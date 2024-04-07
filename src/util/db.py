@@ -1,22 +1,23 @@
 from pymongo import MongoClient
+from pymongo.errors import CollectionInvalid
 from pymongo.server_api import ServerApi
 
 
-def get_database():
-    uri = (
-        "mongodb+srv://server-users.5lef1kv.mongodb.net/?authSource=%24external&authMechanism=MONGODB-X509&retryWrites"
-        "=true&w=majority&appName=server-users")
-    client = MongoClient(uri,
+def get_database(db_uri: str, db_keyfile_path: str):
+    client = MongoClient(db_uri,
                          tls=True,
-                         tlsCertificateKeyFile='/Users/lemon2ee/Documents/Github/CY4740_Project/src/cert/DB-X509-cert'
-                                               '.pem',
+                         tlsCertificateKeyFile=db_keyfile_path,
                          server_api=ServerApi('1'))
 
     db = client['users']
     return db
 
 
-# This is added so that many files can reuse the function get_database()
-if __name__ == "__main__":
-    # Get the database
-    dbname = get_database()
+def db_connect(db_uri, db_keyfile_path):
+    try:
+        database = get_database(db_uri, db_keyfile_path)
+        collection = database["cred"]
+        print("Database connected")
+        return collection
+    except CollectionInvalid:
+        print("Getting collection failed, please make sure the collection is named 'cred'")
