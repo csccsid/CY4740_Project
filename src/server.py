@@ -1,6 +1,9 @@
 import argparse
+import json
 import socket
 import logging
+import struct
+
 from util.db import db_connect
 from util.msg_processing import recv_msg
 
@@ -20,7 +23,7 @@ class Server:
         self.port = port
         self.host = "127.0.0.1"
         self.user_info = {}
-        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.server_socket.bind((self.host, self.port))
         self.db = db_connect(db_uri, db_keyfile_path)
 
