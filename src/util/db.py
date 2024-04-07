@@ -8,7 +8,8 @@ def get_database():
         "=true&w=majority&appName=server-users")
     client = MongoClient(uri,
                          tls=True,
-                         tlsCertificateKeyFile='<path to cert>',
+                         tlsCertificateKeyFile='/Users/lemon2ee/Documents/Github/CY4740_Project/src/cert/DB-X509-cert'
+                                               '.pem',
                          server_api=ServerApi('1'))
 
     db = client['users']

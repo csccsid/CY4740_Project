@@ -2,6 +2,7 @@ import os
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 
+
 def generate_keys():
     # private key
     private_key = rsa.generate_private_key(
@@ -13,6 +14,7 @@ def generate_keys():
     public_key = private_key.public_key()
 
     return private_key, public_key
+
 
 def save_key(key, filename, public):
     if public:
@@ -26,9 +28,10 @@ def save_key(key, filename, public):
             format=serialization.PrivateFormat.PKCS8,
             encryption_algorithm=serialization.NoEncryption()
         )
-    
+
     with open(filename, 'wb') as pem_out:
-            pem_out.write(pem)
+        pem_out.write(pem)
+
 
 def main():
     print("Current Working Directory:", os.getcwd())
@@ -37,6 +40,6 @@ def main():
     save_key(server_public_key, 'server_public_key.pem', True)
     save_key(server_private_key, 'server_private_key.pem', False)
 
+
 if __name__ == '__main__':
     main()
-        
