@@ -37,8 +37,8 @@ def main():
     print("Current Working Directory:", os.getcwd())
     server_private_key, server_public_key = generate_keys()
 
-    save_key(server_public_key, 'server_public_key.pem', True)
-    save_key(server_private_key, 'server_private_key.pem', False)
+    save_key(server_public_key, '../../server_public_key.pem', True)
+    save_key(server_private_key, '../../server_private_key.pem', False)
 
 
 if __name__ == '__main__':
