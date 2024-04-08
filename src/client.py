@@ -1,8 +1,8 @@
+import base64
 import hashlib
 import json
 import logging
 import secrets
-import struct
 import sys
 import argon2
 import argparse
@@ -21,6 +21,12 @@ SERVER_PUBLIC_KEY_PATH = "../server_public_key.pem"
 LOGIN_P = 2**768 - 2**704 - 1 + 2**64 * (int(2**638 * pi) + 149686)
 LOGIN_G = 2
 
+LOGIN = 1
+AUTH = 2
+LOGOUT = 3
+MSG = 4
+CMD = 5
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(filename='client.log', encoding='utf-8', level=logging.DEBUG)
 
@@ -35,6 +41,8 @@ class Client:
         """
         self.active_time = datetime.now()
         self.connect_list = []
+        self.session_key = ""
+        self.login_status = False
     
     
 
@@ -52,22 +60,25 @@ class Client:
                 """
                 Generate login message and encrypt with server public key
                 """
-                message_json = {
+                content_json = {
                     "username": uname,
                     "nonce": nonce,
                     "dh_mod": pow(LOGIN_G, exponent, LOGIN_P)
                 }
-                message_string = json.dumps(message_json)
-                encrypted_message = server_public_key.encrypt(
-                    message_string,
+                content_string = json.dumps(content_json)
+                encrypted_content = server_public_key.encrypt(
+                    content_string,
                     padding.OAEP(
                         mgf=padding.MGF1(algorithm=hashes.SHA256()),
                         algorithm=hashes.SHA256(),
                         label=None
                     )
                 )
-                message_size = struct.pack('!l', len(encrypted_message))
-                s.sendall(message_size + encrypted_message.encode())
+                message_json = {
+                    "event": "login_request",
+                    "request": encrypted_content
+                }
+                s.sendall(util_funcs.pack_message(message_json, LOGIN))
 
 
                 """
@@ -105,7 +116,7 @@ class Client:
                     "nonce": nonce,
                     "hash_password": hash_pswd
                 }
-                temp_key = hashlib.sha256(key_json.dumps().encode()).digest()
+                temp_key = base64.urlsafe_b64encode(hashlib.sha256(key_json.dumps().encode()).digest())
                 fernet_challenge = Fernet(temp_key)
                 challenge_string = fernet_challenge.decrypt(encry_challenge)
                 challenge = json.loads(challenge_string)
@@ -126,20 +137,24 @@ class Client:
                 """
                 Send the third step of login
                 """
-                session_key = pow(server_mod, exponent, LOGIN_P)
+                key_mod = str(pow(server_mod, exponent, LOGIN_P))
+                session_key = base64.urlsafe_b64encode(hashlib.sha256(key_mod.encode()).digest())
                 fernet_session = Fernet(session_key)
-                encrypted_message = fernet_session.encrypt(nonce2)
-                message_size = struct.pack('!l', len(encrypted_message))
-                s.sendall(message_size + encrypted_message.encode())
+                encrypted_nonce = fernet_session.encrypt(str(nonce2).encode())
+                message_json = {
+                    "event": "challenge_response",
+                    "message": encrypted_nonce
+                }
+                s.sendall(util_funcs.pack_message(message_json, LOGIN))
 
 
 
 
         except (socket.error, ConnectionError, ConnectionResetError) as e:
             print(f"Exception login: {e}")
-            return False
+            return False, None
 
-        return True
+        return True, session_key
     
 
 
@@ -171,30 +186,34 @@ if __name__ == "__main__":
     """
     Login Server
     """
-    login_status = client.login(args.u, args.p)
-    if not login_status:
+    client.login_status, client.session_key = client.login(args.u, args.p)
+    if not client.login_status:
         # login fail
         print(f"Init login fail")
         sys.exit(1)
+    # login success
     client.active_time = datetime.now()
 
     while True:
+
         """
         Check active time
         """
         if datetime.now() - client.active_time >  timedelta(minutes = 10):
             # login time out
-            login_status = False
+            client.login_status = False
             while True:
                 uname = input("Login time out, please login again\nUsername:")
                 pswd = input("Password: ")
-                login_status = client.login(uname, pswd)
-                if login_status:
-                    print("Log in successfully!")
+                client.login_status, client.session_key = client.login(uname, pswd)
+                if client.login_status:
                     break
                 
                 # pause a second to avoid consuming to much resource
                 time.sleep(1)
 
 
+        """
+        Exchange message asynchronously
+        """
         user_input = input("Connect to: ")
