@@ -1,3 +1,5 @@
+import json
+import struct
 import sys
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import hashes
@@ -44,3 +46,11 @@ def load_key(file_path, public):
     except Exception as e:
         print(f"Error loading key from {file_path}: {e}")
         sys.exit(1)
+
+"""
+Pack a package
+"""
+def pack_message(message_json, op_cdde):
+    message = json.dumps(message_json).encode()
+    total_length = 4 + 1 + len(message)
+    return struct.pack('!IB', total_length, op_cdde) + message
