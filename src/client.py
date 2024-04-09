@@ -1,24 +1,26 @@
+import argparse
 import base64
 import hashlib
 import json
 import logging
 import secrets
-import sys
-import argon2
-import argparse
-import time
 import socket
-from util import util_funcs, msg_processing
-from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives.asymmetric import padding
-from cryptography.hazmat.primitives import hashes
+import sys
+import time
 from datetime import datetime, timedelta
 from math import pi
 
+import argon2
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+
+from util import util_funcs, msg_processing
+
 SERVER_ADDRESS = "127.0.0.1"
-SERVER_PORT = 10001
+SERVER_PORT = 12345
 SERVER_PUBLIC_KEY_PATH = "../server_public_key.pem"
-LOGIN_P = 2**768 - 2**704 - 1 + 2**64 * (int(2**638 * pi) + 149686)
+LOGIN_P = 2 ** 768 - 2 ** 704 - 1 + 2 ** 64 * (int(2 ** 638 * pi) + 149686)
 LOGIN_G = 2
 
 LOGIN = 1
@@ -29,6 +31,7 @@ CMD = 5
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(filename='client.log', encoding='utf-8', level=logging.DEBUG)
+
 
 class Client:
     """
@@ -43,8 +46,6 @@ class Client:
         self.connect_list = []
         self.session_key = ""
         self.login_status = False
-    
-    
 
     def login(self, uname, pswd):
         try:
@@ -55,7 +56,6 @@ class Client:
                 server_public_key = util_funcs.load_key(SERVER_PUBLIC_KEY_PATH, True)
                 nonce = secrets.token_bytes(2)
                 exponent = secrets.token_bytes(2)
-
 
                 """
                 Generate login message and encrypt with server public key
@@ -80,7 +80,6 @@ class Client:
                 }
                 s.sendall(util_funcs.pack_message(message_json, LOGIN))
 
-
                 """
                 Receive response and verify sign
                 """
@@ -89,15 +88,14 @@ class Client:
                 argon_params_string = response_json["argon_params"]
                 encry_challenge = response_json["challenge"]
                 server_sign = response_json["argon_params_sign"]
-                
+
                 if not util_funcs.check_signature(server_public_key, server_sign, argon_params_string):
                     # sign is wrong
                     logger.debug("Verification of Sign from server fail")
                     raise ValueError("Server error")
                 # sign is correct
                 logger.debug(f"Login of {uname} success")
-                argon_params = json.loads(argon_params_string)  
-
+                argon_params = json.loads(argon_params_string)
 
                 """
                 Decrypt response and handle login result
@@ -132,8 +130,6 @@ class Client:
                 server_mod = challenge["server_mod"]
                 nonce2 = challenge["nonce2"]
 
-
-
                 """
                 Send the third step of login
                 """
@@ -155,30 +151,26 @@ class Client:
             return False, None
 
         return True, session_key
-    
-
 
     """
     Connect to another user
     """
+
     def connect(self, usname):
         pass
-
-
 
     """
     Communicate with connected user
     """
-    def communicate(self, usname, message):
-        pass    
 
+    def communicate(self, usname, message):
+        pass
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Secure Messaging")
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("-u", action="store_true", help="login username")
-    group.add_argument("-p", action="store_true", help="login password")
+    parser.add_argument("-u", type=str, help="login username")
+    parser.add_argument("-p", type=str, help="login password")
     args = parser.parse_args()
 
     client = Client()
@@ -199,7 +191,7 @@ if __name__ == "__main__":
         """
         Check active time
         """
-        if datetime.now() - client.active_time >  timedelta(minutes = 10):
+        if datetime.now() - client.active_time > timedelta(minutes=10):
             # login time out
             client.login_status = False
             while True:
@@ -208,10 +200,9 @@ if __name__ == "__main__":
                 client.login_status, client.session_key = client.login(uname, pswd)
                 if client.login_status:
                     break
-                
+
                 # pause a second to avoid consuming to much resource
                 time.sleep(1)
-
 
         """
         Exchange message asynchronously

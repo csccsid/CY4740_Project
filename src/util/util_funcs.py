@@ -5,7 +5,6 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives import serialization
 
-
 """
 Some help functions
 """
@@ -13,6 +12,8 @@ Some help functions
 """
 Check signature
 """
+
+
 def check_signature(public_key, signature, message):
     try:
         public_key.verify(
@@ -27,11 +28,14 @@ def check_signature(public_key, signature, message):
         return True
     except Exception as e:
         return False
-    
+
+
 """
 Help func to read the public/private key from files
 """
-def load_key(file_path, public):
+
+
+def load_key(file_path, public=True):
     try:
         with open(file_path, "rb") as key_file:
             if public:
@@ -47,9 +51,12 @@ def load_key(file_path, public):
         print(f"Error loading key from {file_path}: {e}")
         sys.exit(1)
 
+
 """
 Pack a package
 """
+
+
 def pack_message(message_json, op_cdde):
     message = json.dumps(message_json).encode()
     total_length = 4 + 1 + len(message)
