@@ -14,13 +14,15 @@ from util.db import db_connect
 from util.crypto import (
     load_key,
     decrypt_with_private_key,
-    encrypt_with_public_key,
     decrypt_with_dh_key,
     generate_dh_private_key,
     generate_nonce,
     fetch_argon2_params,
     sign_data
 )
+
+from asyncio import Lock
+
 
 OP_ERROR = 0
 OP_LOGIN = 1
@@ -36,6 +38,7 @@ logging.basicConfig(filename='server.log', encoding='utf-8', level=logging.DEBUG
 
 DB = None
 Server_Private_Key = None
+AuthenticatedUsers = {}
 
 
 def parse_arguments():
@@ -52,6 +55,9 @@ def parse_arguments():
 
 
 class TCPAuthServerProtocol(asyncio.Protocol):
+    authenticated_users = {}
+    lock = asyncio.Lock()
+
     def __init__(self):
         super().__init__()
         self.transport = None
@@ -72,19 +78,21 @@ class TCPAuthServerProtocol(asyncio.Protocol):
         message = json.loads(data.decode())
         addr = self.transport.get_extra_info('peername')
         print(f"Received message from {addr}: {message}")
-        self.process_message(message, addr)
+        asyncio.create_task(self.process_message(message, addr))
 
-    def process_message(self, message, addr):
-        global OP_LOGIN
-        # Process authentication based on message and current state
-        # Placeholder for authentication logic
-        match message.get("op_code"):
-            case OP_LOGIN:
-                return self.on_login(message, addr)
-        # response = json.dumps({"status": "ok"})
-        # self.transport.write(response.encode())
+    async def process_message(self, message, addr):
+        try:
+            if message.get("op_code") == OP_LOGIN:
+                await self.on_login(message, addr)
+        except Exception as e:
+            logger.error(f"Error processing message: {e}")
+            self.transport.close()
 
-    def on_login(self, message, addr):
+    async def modify_users(self, username, addr):
+        async with self.lock:
+            self.authenticated_users[username] = addr
+
+    async def on_login(self, message, addr):
         """
         Handles login attempts and responses during the authentication process.
 
@@ -185,6 +193,7 @@ class TCPAuthServerProtocol(asyncio.Protocol):
                 user_not_found = {"op_code": OP_LOGIN, "event": "user not found", "payload": ""}
                 self.transport.write(json.dumps(user_not_found).encode())
 
+        # this is the second client message received, server expecting the server_nonce encrypted with dh_key
         elif self.login_state == "AWAITING_CHALLENGE_RESP" and message.get("event") == "challenge_response":
             # Verify the challenge response
             # Message should be encrypted with the sha256 hash of dh_key
@@ -196,14 +205,17 @@ class TCPAuthServerProtocol(asyncio.Protocol):
             # client should be able to use the password derived key to decrypt payload
             # and obtain server_nonce
             if decrypted_json.get("server_nonce") == self.server_nonce:
-                response = {"event": "auth_status", "status": "success"}
+                response = {"op_code": OP_LOGIN, "event": "auth successful", "payload": ""}
             else:
-                response = {"event": "auth_status", "status": "failure"}
+                response = {"op_code": OP_LOGIN, "event": "auth failed", "payload": ""}
 
             # notify client status of login
             self.transport.write(json.dumps(response).encode())
             self.login_state = "AUTHENTICATED"  # Or reset to "AWAITING_AUTH_REQ" if failed
+            await self.modify_users(self.username, addr)
+            print(self.authenticated_users)
 
+        # wrong event during states or unexpected event
         else:
             # Unexpected message type or sequence
             error_msg = {"event": "error", "message": "Unexpected message or state."}

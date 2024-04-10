@@ -528,3 +528,30 @@ TypeError: string indices must be integers, not 'str'
 DEBUG:asyncio:Using selector: KqueueSelector
 DEBUG:asyncio:Using selector: KqueueSelector
 DEBUG:asyncio:Using selector: KqueueSelector
+DEBUG:asyncio:Using selector: KqueueSelector
+DEBUG:asyncio:Using selector: KqueueSelector
+DEBUG:asyncio:Using selector: KqueueSelector
+DEBUG:asyncio:Using selector: KqueueSelector
+DEBUG:asyncio:Using selector: KqueueSelector
+DEBUG:asyncio:Using selector: KqueueSelector
+DEBUG:asyncio:Using selector: KqueueSelector
+DEBUG:asyncio:Using selector: KqueueSelector
+ERROR:asyncio:Fatal error: protocol.data_received() call failed.
+protocol: <__main__.TCPAuthServerProtocol object at 0x13898d2b0>
+transport: <_SelectorSocketTransport fd=16 read=polling write=<idle, bufsize=0>>
+Traceback (most recent call last):
+  File "/Users/lemon2ee/.pyenv/versions/3.12.1/lib/python3.12/asyncio/selector_events.py", line 1023, in _read_ready__data_received
+    self._protocol.data_received(data)
+  File "/Users/lemon2ee/Documents/Github/CY4740_Project/src/server.py", line 82, in data_received
+    self.process_message(message, addr)
+  File "/Users/lemon2ee/Documents/Github/CY4740_Project/src/server.py", line 90, in process_message
+    return self.on_login(message, addr)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/lemon2ee/Documents/Github/CY4740_Project/src/server.py", line 218, in on_login
+    self.modify_users(self.username, addr)
+  File "/Users/lemon2ee/Documents/Github/CY4740_Project/src/server.py", line 95, in modify_users
+    with self.lock:
+TypeError: 'Lock' object does not support the context manager protocol
+DEBUG:asyncio:Using selector: KqueueSelector
+DEBUG:asyncio:Using selector: KqueueSelector
+DEBUG:asyncio:Using selector: KqueueSelector
