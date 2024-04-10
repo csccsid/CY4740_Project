@@ -20,11 +20,11 @@ SERVER_PUBLIC_KEY_PATH = "../server_public_key.pem"
 PRIME = (2 ** 1024) - (2 ** 960) - 1 + (2 ** 64) * (int(2 ** 894 * math.pi) + 129093)
 GENERATOR = 2
 
-# password = "Voyage#2024"
-# username = "stellar_journey"
+password = "Voyage#2024"
+username = "stellar_journey"
 
-password = "ScoutTheStars!"
-username = "interstellar_scout"
+# password = "ScoutTheStars!"
+# username = "interstellar_scout"
 
 async def tcp_client(message, server_public_key, client_nonce, client_secret, host='127.0.0.1', port=12345):
     reader, writer = await asyncio.open_connection(host, port)

@@ -555,3 +555,4 @@ TypeError: 'Lock' object does not support the context manager protocol
 DEBUG:asyncio:Using selector: KqueueSelector
 DEBUG:asyncio:Using selector: KqueueSelector
 DEBUG:asyncio:Using selector: KqueueSelector
+DEBUG:asyncio:Using selector: KqueueSelector
