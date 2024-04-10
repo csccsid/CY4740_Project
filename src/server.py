@@ -226,6 +226,8 @@ class TCPAuthServerProtocol(asyncio.Protocol):
             print(f"Error on connection: {exc}")
         else:
             print("Connection closed by client.")
+
+        self.__init__()
         super().connection_lost(exc)
 
 
