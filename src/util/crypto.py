@@ -1,12 +1,12 @@
-import argparse
-import os
+import base64
+import hashlib
+import json
 import secrets
 
 import argon2
 from argon2.exceptions import InvalidHash
-from argon2 import PasswordHasher
 from cryptography.hazmat.primitives import serialization, hashes
-from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 from cryptography.exceptions import InvalidSignature
@@ -204,3 +204,49 @@ def generate_dh_private_key(bit_length=320):
 def generate_nonce(length=16):
     # Generate a cryptographically strong random string of specified length
     return secrets.token_hex(length)
+
+
+def get_sha256_dh_key(dh_key):
+    """
+    Generates an SHA-256 hash of a Diffie-Hellman key.
+
+    This function converts a Diffie-Hellman key from an integer to bytes,
+    hashes it using SHA-256, and returns the hash as a byte string.
+    This byte string can be used as a symmetric key for cryptographic algorithms.
+
+    Parameters:
+    - dh_key (int): The Diffie-Hellman key as an integer.
+
+    Returns:
+    - bytes: The SHA-256 hash of the Diffie-Hellman key.
+    """
+    bytes_length = (dh_key.bit_length() + 7) // 8  # Calculate the number of bytes needed
+    dh_key_bytes = dh_key.to_bytes(bytes_length, byteorder='big')
+    hash_object = hashlib.sha256(dh_key_bytes)
+    return hash_object.digest()
+
+
+def decrypt_with_dh_key(dh_key, cipher_text, iv):
+    """
+    Decrypts AES-encrypted data using a Diffie-Hellman key.
+
+    Parameters:
+    - dh_key (bytes): The Diffie-Hellman key.
+    - cipher_text (str): Base64-encoded encrypted data.
+    - iv (str): Base64-encoded initialization vector.
+
+    Returns:
+    - dict: The decrypted data parsed as JSON.
+    """
+    dh_key_sha = get_sha256_dh_key(dh_key)
+    cipher_text = base64.b64decode(cipher_text)
+    chal_iv = base64.b64decode(iv)
+    cipher = Cipher(algorithms.AES(dh_key_sha), modes.CFB(chal_iv), backend=default_backend())
+
+    # Decrypt the data
+    decryptor = cipher.decryptor()
+    decrypted_data = decryptor.update(cipher_text) + decryptor.finalize()
+
+    # Convert the decrypted data back to a string (assuming it was originally a JSON string)
+    decrypted_string = decrypted_data.decode('ascii')
+    return json.loads(decrypted_string)

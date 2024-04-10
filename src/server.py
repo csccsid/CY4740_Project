@@ -15,6 +15,7 @@ from util.crypto import (
     load_key,
     decrypt_with_private_key,
     encrypt_with_public_key,
+    decrypt_with_dh_key,
     generate_dh_private_key,
     generate_nonce,
     fetch_argon2_params,
@@ -159,33 +160,23 @@ class TCPAuthServerProtocol(asyncio.Protocol):
                 print(f"User not found {self.username}")
                 user_not_found = {"op_code": OP_LOGIN, "event": "user not found", "payload": ""}
                 self.transport.write(json.dumps(user_not_found).encode())
-            # Process the initial authentication request
 
         elif self.login_state == "AWAITING_CHALLENGE_RESP" and message.get("event") == "challenge_response":
             # Verify the challenge response
-
-            bytes_length = (self.dh_key.bit_length() + 7) // 8  # Calculate the number of bytes needed
-            dh_key_bytes = self.dh_key.to_bytes(bytes_length, byteorder='big')
-            hash_object = hashlib.sha256(dh_key_bytes)
-            dh_key_sha = hash_object.digest()
-
+            # Message should be encrypted with the sha256 hash of dh_key
             chal_resp_payload = json.loads(message['payload'])
-            print(chal_resp_payload)
-            cipher_text = base64.b64decode(chal_resp_payload["ciphertext"])
-            chal_iv = base64.b64decode(chal_resp_payload["iv"])
-            cipher = Cipher(algorithms.AES(dh_key_sha), modes.CFB(chal_iv), backend=default_backend())
+            decrypted_json = decrypt_with_dh_key(dh_key=self.dh_key,
+                                                 cipher_text=chal_resp_payload["ciphertext"],
+                                                 iv=chal_resp_payload["iv"])
 
-            # Decrypt the data
-            decryptor = cipher.decryptor()
-            decrypted_data = decryptor.update(cipher_text) + decryptor.finalize()
-
-            # Convert the decrypted data back to a string (assuming it was originally a JSON string)
-            decrypted_string = decrypted_data.decode('ascii')
-            decrypted_json = json.loads(decrypted_string)
+            # client should be able to use the password derived key to decrypt payload
+            # and obtain server_nonce
             if decrypted_json.get("server_nonce") == self.server_nonce:
                 response = {"event": "auth_status", "status": "success"}
             else:
                 response = {"event": "auth_status", "status": "failure"}
+
+            # notify client status of login
             self.transport.write(json.dumps(response).encode())
             self.login_state = "AUTHENTICATED"  # Or reset to "AWAITING_AUTH_REQ" if failed
         else:
