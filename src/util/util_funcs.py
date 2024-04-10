@@ -10,6 +10,7 @@ from cryptography.hazmat.primitives import serialization
 Some help functions
 """
 
+
 """
 Check signature
 """
@@ -28,6 +29,7 @@ def check_signature(public_key, signature, message):
     except Exception as e:
         return False
     
+
 """
 Help func to read the public/private key from files
 """
@@ -46,6 +48,7 @@ def load_key(file_path, public):
     except Exception as e:
         print(f"Error loading key from {file_path}: {e}")
         sys.exit(1)
+
 
 """
 Pack a package
