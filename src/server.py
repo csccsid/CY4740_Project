@@ -85,6 +85,30 @@ class TCPAuthServerProtocol(asyncio.Protocol):
         # self.transport.write(response.encode())
 
     def on_login(self, message, addr):
+        """
+        Handles login attempts and responses during the authentication process.
+
+        This method processes two main types of messages based on the current state of login:
+        1. 'auth_request': Decrypts the received encrypted credentials, fetches user data from the database,
+           generates a Diffie-Hellman key, and sends an authentication challenge encrypted with AES.
+        2. 'challenge_response': Verifies the response to the authentication challenge, updates login state,
+           and notifies the client of the authentication status.
+
+        Depending on the login_state and the message event type, it performs the necessary cryptographic
+        operations and state transitions.
+
+        Parameters:
+        - message (dict): A dictionary containing the incoming message with potential keys like 'event' and 'payload'.
+        - addr (tuple): The client's address from which the message was received.
+
+        The function updates internal state and prepares responses which involve cryptographic operations
+        like decryption using private keys, AES encryption, and signature verification. The results of these
+        operations are used to determine the legitimacy of login attempts and to craft appropriate responses.
+
+        Raises:
+        - KeyError: If necessary keys are missing in the message.
+        - ValueError: If decoding or cryptographic operations fail.
+        """
         global OP_LOGIN
 
         # handling the initial auth request message
@@ -179,6 +203,7 @@ class TCPAuthServerProtocol(asyncio.Protocol):
             # notify client status of login
             self.transport.write(json.dumps(response).encode())
             self.login_state = "AUTHENTICATED"  # Or reset to "AWAITING_AUTH_REQ" if failed
+
         else:
             # Unexpected message type or sequence
             error_msg = {"event": "error", "message": "Unexpected message or state."}
