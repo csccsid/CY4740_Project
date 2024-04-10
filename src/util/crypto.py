@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import json
+import os
 import secrets
 
 import argon2
@@ -250,3 +251,45 @@ def decrypt_with_dh_key(dh_key, cipher_text, iv):
     # Convert the decrypted data back to a string (assuming it was originally a JSON string)
     decrypted_string = decrypted_data.decode('ascii')
     return json.loads(decrypted_string)
+
+
+def encrypt_with_dh_key(dh_key, data):
+    """
+    Encrypts the given data using the Diffie-Hellman key (dh_key) after hashing it with SHA-256.
+
+    Parameters:
+    dh_key (bytes): The Diffie-Hellman key used for encryption.
+    data (dict): The data to encrypt, which must be serializable to JSON.
+
+    Returns:
+    tuple: A tuple containing two strings; the base64-encoded ciphertext and the base64-encoded initialization vector (IV).
+
+    The encryption uses AES algorithm in CFB mode with a 16-byte IV.
+    """
+    dh_key_sha = get_sha256_dh_key(dh_key)
+
+    return encrypt_with_key(dh_key_sha, data)
+
+
+def encrypt_with_key(key, data):
+    iv = os.urandom(16)
+    cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend())
+
+    encryptor = cipher.encryptor()
+    ciphertext = encryptor.update(json.dumps(data).encode()) + encryptor.finalize()
+
+    ciphertext_encoded = base64.b64encode(ciphertext).decode('ascii')
+    iv_encoded = base64.b64encode(iv).decode('ascii')
+    return ciphertext_encoded, iv_encoded
+
+
+def encrypt_with_key_prime(key_content, data):
+    # Convert the dictionary to a JSON string to ensure consistent ordering
+    content_string = json.dumps(key_content, sort_keys=True)
+
+    # Encode the string to bytes
+    content_bytes = content_string.encode('ascii')
+    hash_object = hashlib.sha256(content_bytes)
+    key_prime = hash_object.digest()
+
+    return encrypt_with_key(key_prime, data)

@@ -5,12 +5,11 @@ import hashlib
 import json
 import logging
 import math
-
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.backends import default_backend
 import os
 
-from util.db import db_connect
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
 from util.crypto import (
     load_key,
     decrypt_with_private_key,
@@ -18,11 +17,11 @@ from util.crypto import (
     generate_dh_private_key,
     generate_nonce,
     fetch_argon2_params,
+    encrypt_with_dh_key,
+    encrypt_with_key_prime,
     sign_data
 )
-
-from asyncio import Lock
-
+from util.db import db_connect
 
 OP_ERROR = 0
 OP_LOGIN = 1
@@ -38,7 +37,6 @@ logging.basicConfig(filename='server.log', encoding='utf-8', level=logging.DEBUG
 
 DB = None
 Server_Private_Key = None
-AuthenticatedUsers = {}
 
 
 def parse_arguments():
@@ -82,19 +80,54 @@ class TCPAuthServerProtocol(asyncio.Protocol):
 
     async def process_message(self, message, addr):
         try:
-            if message.get("op_code") == OP_LOGIN:
-                await self.on_login(message, addr)
+            match message.get("op_code"):
+                case 1:
+                    await self.on_login(message, addr)
+                case 4:
+                    self.on_cmd(message, addr)
         except Exception as e:
             logger.error(f"Error processing message: {e}")
             self.transport.close()
 
-    async def modify_users(self, username, addr):
+    async def modify_users(self, username, addr, dh_key):
         async with self.lock:
-            self.authenticated_users[username] = addr
+            self.authenticated_users[username] = {"addr": addr, "dh_key": dh_key}
+
+    async def find_user_by_addr(self, addr):
+        async with self.lock:
+            for username, details in self.authenticated_users.items():
+                if details["addr"] == addr:
+                    return username, details["dh_key"]
+            return None, None  # If no user is found with the given addr
 
     async def modify_users_remove(self, username):
         async with self.lock:
             self.authenticated_users.pop(username, None)
+
+    def on_cmd(self, message, addr):
+        """
+        Handle all the commands sent from client, and delegate them to specific handlers
+
+        Currently supported commands:
+        - LIST (get all authenticated/logged-in users)
+
+        :param message: request message from client
+        :param addr: address of the client
+        """
+
+        match message["event"]:
+            case "LIST":
+                asyncio.create_task(self.on_list(message, addr))
+
+    async def on_list(self, message, addr):
+        username, dh_key = await self.find_user_by_addr(addr)
+
+        payload_content = decrypt_with_dh_key(dh_key,
+                                              message['payload']['ciphertext'],
+                                              message['payload']['iv'])
+
+        print(payload_content)
+        pass
 
     async def on_login(self, message, addr):
         """
@@ -155,27 +188,12 @@ class TCPAuthServerProtocol(asyncio.Protocol):
                 key_prime_content = {"nonce": self.auth_user_nonce,
                                      "password_hash": self.argon2_hash}
 
-                # Convert the dictionary to a JSON string to ensure consistent ordering
-                content_string = json.dumps(key_prime_content, sort_keys=True)
-
-                # Encode the string to bytes
-                content_bytes = content_string.encode('ascii')
-                hash_object = hashlib.sha256(content_bytes)
-                key_prime = hash_object.digest()
-
-                iv = os.urandom(16)
-
                 challenge_content = {"client_nonce": self.auth_user_nonce,
                                      "server_nonce": self.server_nonce,
                                      "server_modulo": server_modulo}
 
-                cipher = Cipher(algorithms.AES(key_prime), modes.CFB(iv), backend=default_backend())
-
-                encryptor = cipher.encryptor()
-                ciphertext = encryptor.update(json.dumps(challenge_content).encode()) + encryptor.finalize()
-
-                ciphertext_encoded = base64.b64encode(ciphertext).decode('ascii')
-                iv_encoded = base64.b64encode(iv).decode('ascii')
+                ciphertext_encoded, iv_encoded = encrypt_with_key_prime(key_content=key_prime_content,
+                                                                        data=challenge_content)
 
                 payload = {"argon2_params": argon2_params,
                            "argon2_params_signature": argon2_params_signature_encoded,
@@ -216,7 +234,7 @@ class TCPAuthServerProtocol(asyncio.Protocol):
             # notify client status of login
             self.transport.write(json.dumps(response).encode())
             self.login_state = "AUTHENTICATED"  # Or reset to "AWAITING_AUTH_REQ" if failed
-            await self.modify_users(self.username, addr)
+            await self.modify_users(self.username, addr, self.dh_key)
             print(self.authenticated_users)
 
         # wrong event during states or unexpected event
