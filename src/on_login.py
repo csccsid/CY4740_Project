@@ -10,22 +10,24 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 
 from util.crypto import encrypt_with_public_key
+from util.crypto import decrypt_with_dh_key
 from util.crypto import load_key
 from util.crypto import generate_dh_private_key
 from util.crypto import generate_nonce
 from util.crypto import verify_signature
+from util.crypto import encrypt_with_dh_key
 
 SERVER_PUBLIC_KEY_PATH = "../server_public_key.pem"
 
 PRIME = (2 ** 1024) - (2 ** 960) - 1 + (2 ** 64) * (int(2 ** 894 * math.pi) + 129093)
 GENERATOR = 2
 
-password = "Voyage#2024"
-username = "stellar_journey"
+# password = "Voyage#2024"
+# username = "stellar_journey"
 
 
-# password = "ScoutTheStars!"
-# username = "interstellar_scout"
+password = "ScoutTheStars!"
+username = "interstellar_scout"
 
 async def tcp_client(message, server_public_key, client_nonce, client_secret, host='127.0.0.1', port=12345):
     reader, writer = await asyncio.open_connection(host, port)
@@ -136,6 +138,23 @@ async def tcp_client(message, server_public_key, client_nonce, client_secret, ho
         # at this stage, if with the correct credentials, the user would be authenticated.
 
         # the following is the process simulating LIST command
+
+        list_payload_content = {"username": username}
+        ciphertext_1, iv_1 = encrypt_with_dh_key(dh_key=dh_key, data=list_payload_content)
+        list_payload = {"ciphertext": ciphertext_1, "iv": iv_1}
+        list_cmd = {"op_code": 4, "event": "LIST", "payload": json.dumps(list_payload)}
+        list_json = json.dumps(list_cmd).encode()
+        writer.write(list_json)
+
+        data_2 = await reader.read(4096)
+        data_2_decoded = data_2.decode('ascii')
+        data_2_decoded_json = json.loads(data_2_decoded)
+        data_2_payload = json.loads(data_2_decoded_json["payload"])
+
+        data_2_content = decrypt_with_dh_key(dh_key=dh_key,
+                                             cipher_text=data_2_payload['ciphertext'],
+                                             iv=data_2_payload['iv'])
+        print(data_2_content)
 
     await writer.wait_closed()
 

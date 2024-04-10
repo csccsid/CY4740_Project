@@ -559,3 +559,106 @@ DEBUG:asyncio:Using selector: KqueueSelector
 DEBUG:asyncio:Using selector: KqueueSelector
 DEBUG:asyncio:Using selector: KqueueSelector
 DEBUG:asyncio:Using selector: KqueueSelector
+DEBUG:asyncio:Using selector: KqueueSelector
+ERROR:asyncio:Task exception was never retrieved
+future: <Task finished name='Task-7' coro=<TCPAuthServerProtocol.on_list() done, defined at /Users/lemon2ee/Documents/Github/CY4740_Project/src/server.py:118> exception=TypeError("string indices must be integers, not 'str'")>
+Traceback (most recent call last):
+  File "/Users/lemon2ee/Documents/Github/CY4740_Project/src/server.py", line 122, in on_list
+    message['payload']['ciphertext'],
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+TypeError: string indices must be integers, not 'str'
+DEBUG:asyncio:Using selector: KqueueSelector
+ERROR:asyncio:Task exception was never retrieved
+future: <Task finished name='Task-7' coro=<TCPAuthServerProtocol.on_list() done, defined at /Users/lemon2ee/Documents/Github/CY4740_Project/src/server.py:120> exception=TypeError("string indices must be integers, not 'str'")>
+Traceback (most recent call last):
+  File "/Users/lemon2ee/Documents/Github/CY4740_Project/src/server.py", line 124, in on_list
+    message['payload']['ciphertext'],
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+TypeError: string indices must be integers, not 'str'
+ERROR:asyncio:Task exception was never retrieved
+future: <Task finished name='Task-12' coro=<TCPAuthServerProtocol.on_list() done, defined at /Users/lemon2ee/Documents/Github/CY4740_Project/src/server.py:120> exception=TypeError("string indices must be integers, not 'str'")>
+Traceback (most recent call last):
+  File "/Users/lemon2ee/Documents/Github/CY4740_Project/src/server.py", line 124, in on_list
+TypeError: string indices must be integers, not 'str'
+DEBUG:asyncio:Using selector: KqueueSelector
+ERROR:asyncio:Task exception was never retrieved
+future: <Task finished name='Task-7' coro=<TCPAuthServerProtocol.on_list() done, defined at /Users/lemon2ee/Documents/Github/CY4740_Project/src/server.py:118> exception=TypeError("string indices must be integers, not 'str'")>
+Traceback (most recent call last):
+  File "/Users/lemon2ee/Documents/Github/CY4740_Project/src/server.py", line 122, in on_list
+    message['payload']['ciphertext'],
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+TypeError: string indices must be integers, not 'str'
+ERROR:asyncio:Task exception was never retrieved
+future: <Task finished name='Task-12' coro=<TCPAuthServerProtocol.on_list() done, defined at /Users/lemon2ee/Documents/Github/CY4740_Project/src/server.py:118> exception=TypeError("string indices must be integers, not 'str'")>
+Traceback (most recent call last):
+  File "/Users/lemon2ee/Documents/Github/CY4740_Project/src/server.py", line 122, in on_list
+    message['payload']['iv'])
+TypeError: string indices must be integers, not 'str'
+DEBUG:asyncio:Using selector: KqueueSelector
+ERROR:asyncio:Task exception was never retrieved
+future: <Task finished name='Task-7' coro=<TCPAuthServerProtocol.on_list() done, defined at /Users/lemon2ee/Documents/Github/CY4740_Project/src/server.py:118> exception=TypeError("string indices must be integers, not 'str'")>
+Traceback (most recent call last):
+  File "/Users/lemon2ee/Documents/Github/CY4740_Project/src/server.py", line 122, in on_list
+    message['payload']['ciphertext'],
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+TypeError: string indices must be integers, not 'str'
+DEBUG:asyncio:Using selector: KqueueSelector
+ERROR:asyncio:Task exception was never retrieved
+future: <Task finished name='Task-7' coro=<TCPAuthServerProtocol.on_list() done, defined at /Users/lemon2ee/Documents/Github/CY4740_Project/src/server.py:118> exception=TypeError("string indices must be integers, not 'str'")>
+Traceback (most recent call last):
+  File "/Users/lemon2ee/Documents/Github/CY4740_Project/src/server.py", line 122, in on_list
+    message['payload']['ciphertext'],
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+TypeError: string indices must be integers, not 'str'
+DEBUG:asyncio:Using selector: KqueueSelector
+ERROR:asyncio:Task exception was never retrieved
+future: <Task finished name='Task-7' coro=<TCPAuthServerProtocol.on_list() done, defined at /Users/lemon2ee/Documents/Github/CY4740_Project/src/server.py:118> exception=TypeError("string indices must be integers, not 'str'")>
+Traceback (most recent call last):
+  File "/Users/lemon2ee/Documents/Github/CY4740_Project/src/server.py", line 124, in on_list
+    message['payload']['ciphertext'],
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+TypeError: string indices must be integers, not 'str'
+DEBUG:asyncio:Using selector: KqueueSelector
+ERROR:asyncio:Task exception was never retrieved
+future: <Task finished name='Task-7' coro=<TCPAuthServerProtocol.on_list() done, defined at /Users/lemon2ee/Documents/Github/CY4740_Project/src/server.py:118> exception=TypeError("string indices must be integers, not 'str'")>
+Traceback (most recent call last):
+  File "/Users/lemon2ee/Documents/Github/CY4740_Project/src/server.py", line 124, in on_list
+    message['payload']['ciphertext'],
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+TypeError: string indices must be integers, not 'str'
+DEBUG:asyncio:Using selector: KqueueSelector
+ERROR:asyncio:Task exception was never retrieved
+future: <Task finished name='Task-7' coro=<TCPAuthServerProtocol.on_list() done, defined at /Users/lemon2ee/Documents/Github/CY4740_Project/src/server.py:117> exception=TypeError("string indices must be integers, not 'str'")>
+Traceback (most recent call last):
+  File "/Users/lemon2ee/Documents/Github/CY4740_Project/src/server.py", line 123, in on_list
+    message['payload']['ciphertext'],
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+TypeError: string indices must be integers, not 'str'
+DEBUG:asyncio:Using selector: KqueueSelector
+DEBUG:asyncio:Using selector: KqueueSelector
+ERROR:asyncio:Task exception was never retrieved
+future: <Task finished name='Task-7' coro=<TCPAuthServerProtocol.on_list() done, defined at /Users/lemon2ee/Documents/Github/CY4740_Project/src/server.py:127> exception=TypeError('Object of type coroutine is not JSON serializable')>
+Traceback (most recent call last):
+  File "/Users/lemon2ee/Documents/Github/CY4740_Project/src/server.py", line 142, in on_list
+    user_list_cipher, user_list_iv = encrypt_with_dh_key(dh_key=self.dh_key, data=user_list)
+                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/lemon2ee/Documents/Github/CY4740_Project/src/util/crypto.py", line 271, in encrypt_with_dh_key
+    return encrypt_with_key(dh_key_sha, data)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/lemon2ee/Documents/Github/CY4740_Project/src/util/crypto.py", line 279, in encrypt_with_key
+    ciphertext = encryptor.update(json.dumps(data).encode()) + encryptor.finalize()
+                                  ^^^^^^^^^^^^^^^^
+  File "/Users/lemon2ee/.pyenv/versions/3.12.1/lib/python3.12/json/__init__.py", line 231, in dumps
+    return _default_encoder.encode(obj)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/lemon2ee/.pyenv/versions/3.12.1/lib/python3.12/json/encoder.py", line 200, in encode
+    chunks = self.iterencode(o, _one_shot=True)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/lemon2ee/.pyenv/versions/3.12.1/lib/python3.12/json/encoder.py", line 258, in iterencode
+    return _iterencode(o, 0)
+           ^^^^^^^^^^^^^^^^^
+  File "/Users/lemon2ee/.pyenv/versions/3.12.1/lib/python3.12/json/encoder.py", line 180, in default
+    raise TypeError(f'Object of type {o.__class__.__name__} '
+TypeError: Object of type coroutine is not JSON serializable
+DEBUG:asyncio:Using selector: KqueueSelector
+DEBUG:asyncio:Using selector: KqueueSelector

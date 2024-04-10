@@ -1,14 +1,9 @@
 import argparse
 import asyncio
 import base64
-import hashlib
 import json
 import logging
 import math
-import os
-
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 from util.crypto import (
     load_key,
@@ -104,6 +99,16 @@ class TCPAuthServerProtocol(asyncio.Protocol):
         async with self.lock:
             self.authenticated_users.pop(username, None)
 
+    async def get_all_usernames(self):
+        """
+        Retrieves a list of all authenticated usernames.
+
+        Returns:
+        list: A list containing the usernames of all authenticated users.
+        """
+        async with self.lock:
+            return list(self.authenticated_users.keys())
+
     def on_cmd(self, message, addr):
         """
         Handle all the commands sent from client, and delegate them to specific handlers
@@ -120,14 +125,45 @@ class TCPAuthServerProtocol(asyncio.Protocol):
                 asyncio.create_task(self.on_list(message, addr))
 
     async def on_list(self, message, addr):
+        """
+        Process a client's list request to retrieve all usernames. Decrypts the client's message,
+        verifies the username, and sends back an encrypted list of usernames.
+
+        Args:
+            message (dict): The received message containing 'payload' with encrypted data and an 'iv'.
+            addr (tuple): Client's address used to identify the user and their encryption key.
+
+        Returns:
+            None: Sends an encrypted response to the client and handles errors internally.
+        """
         username, dh_key = await self.find_user_by_addr(addr)
 
-        payload_content = decrypt_with_dh_key(dh_key,
-                                              message['payload']['ciphertext'],
-                                              message['payload']['iv'])
+        list_request_payload_json = json.loads(message['payload'])
 
-        print(payload_content)
-        pass
+        list_request_payload_content = decrypt_with_dh_key(dh_key,
+                                                           list_request_payload_json['ciphertext'],
+                                                           list_request_payload_json['iv'])
+
+        if username != list_request_payload_content["username"]:
+            print("Request username mismatch")
+            self.transport.close()
+            self.__init__()
+        else:
+            user_list = await self.get_all_usernames()
+            user_list_cipher, user_list_iv = encrypt_with_dh_key(dh_key=self.dh_key, data=user_list)
+
+            user_list_payload = {
+                "ciphertext": user_list_cipher,
+                "iv": user_list_iv}
+
+            user_list_response = {
+                "op_code": OP_CMD,
+                "event": "LIST_RESP",
+                "payload": json.dumps(user_list_payload)
+            }
+
+            print(f"Sent: {user_list_response}")
+            self.transport.write(json.dumps(user_list_response).encode('ascii'))
 
     async def on_login(self, message, addr):
         """
