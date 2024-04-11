@@ -6,23 +6,13 @@ import socket
 import sys
 import time
 from datetime import datetime, timedelta
-from math import pi
 import argon2
+import constant
 
-from util import util_funcs, msg_processing, crypto
+from util import util_funcs, crypto
 
-SERVER_ADDRESS = "127.0.0.1"
-SERVER_PORT = 12345
+
 SERVER_PUBLIC_KEY_PATH = "../server_public_key.pem"
-LOGIN_P = 2 ** 768 - 2 ** 704 - 1 + 2 ** 64 * (int(2 ** 638 * pi) + 149686)
-LOGIN_G = 2
-
-OP_ERROR = 0
-OP_LOGIN = 1
-OP_LOGOUT = 2
-OP_AUTH = 3
-OP_CMD = 4
-OP_MSG = 5
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(filename='client.log', encoding='utf-8', level=logging.DEBUG)
@@ -47,7 +37,7 @@ class Client:
     def login(self, uname, pswd):
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.connect((SERVER_ADDRESS, SERVER_PORT))
+                s.connect((constant.SERVER_ADDRESS, constant.SERVER_PORT))
                 logger.debug(f"Connect to server for {uname} login")
 
                 server_public_key = util_funcs.load_key(SERVER_PUBLIC_KEY_PATH, True)
@@ -60,14 +50,14 @@ class Client:
                 payload_json = {
                     "username": uname,
                     "nonce": nonce,
-                    "modulo": pow(LOGIN_G, exponent, LOGIN_P)
+                    "modulo": pow(constant.G, exponent, constant.P)
                 }
                 payload_string = json.dumps(payload_json)
                 payload_bytes = payload_string.encode('ascii')
                 encrypted_payload = crypto.encrypt_with_public_key(public_key=server_public_key, data=payload_bytes)
                 payload_base64 = base64.b64encode(encrypted_payload).decode('ascii')
                 message_json = {
-                    "op_code": OP_LOGIN,
+                    "op_code": constant.OP_LOGIN,
                     "event": "auth_request",
                     "payload": payload_base64
                 }
@@ -81,7 +71,7 @@ class Client:
                 response_json =json.loads(msg.decode())
                 print(f"Receive message {response_json}")
                 logger.debug(f"Receive challenge from server for {uname}")
-                if response_json.get("op_code") != OP_LOGIN or response_json.get("event") != "auth_request_challenge":
+                if response_json.get("op_code") != constant.OP_LOGIN or response_json.get("event") != "auth_request_challenge":
                     # invalid message
                     logger.debug(f"Invalid format response from server {response_json} in login process")
                     raise ValueError("Server error")
@@ -145,7 +135,7 @@ class Client:
                 """
                 Send the third step of login
                 """
-                self.server_dh_key = pow(server_mod, exponent, LOGIN_P)
+                self.server_dh_key = pow(server_mod, exponent, constant.P)
                 server_nonce_json = {
                     "server_nonce": nonce2
                 }
@@ -156,7 +146,7 @@ class Client:
                     "iv": dh_iv_encoded
                 }
                 message_json = {
-                    "op_code": OP_LOGIN,
+                    "op_code": constant.OP_LOGIN,
                     "event": "challenge_response",
                     "payload": chal_resp_payload
                 }
@@ -167,7 +157,8 @@ class Client:
 
         except (socket.error, ConnectionError, ConnectionResetError) as e:
             print(f"Exception login: {e}")
-            return False, None
+            logger.debug(f"Exception login: {e}")
+            return False
 
         return True
 
@@ -206,6 +197,8 @@ if __name__ == "__main__":
         sys.exit(1)
     # login success
     client.active_time = datetime.now()
+
+
 
     while True:
 
