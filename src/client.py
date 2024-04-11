@@ -1,27 +1,19 @@
 import argparse
-import argparse
 import base64
 import json
 import logging
-import secrets
-import socket
 import socket
 import sys
 import time
 from datetime import datetime, timedelta
 from math import pi
-
 import argon2
-from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import padding
 
 from util import util_funcs, msg_processing, crypto
 
 SERVER_ADDRESS = "127.0.0.1"
 SERVER_PORT = 12345
 SERVER_PUBLIC_KEY_PATH = "../server_public_key.pem"
-LOGIN_P = 2 ** 768 - 2 ** 704 - 1 + 2 ** 64 * (int(2 ** 638 * pi) + 149686)
 LOGIN_P = 2 ** 768 - 2 ** 704 - 1 + 2 ** 64 * (int(2 ** 638 * pi) + 149686)
 LOGIN_G = 2
 
@@ -59,8 +51,8 @@ class Client:
                 logger.debug(f"Connect to server for {uname} login")
 
                 server_public_key = util_funcs.load_key(SERVER_PUBLIC_KEY_PATH, True)
-                nonce = secrets.token_bytes(2)
-                exponent = secrets.token_bytes(2)
+                nonce = crypto.generate_nonce()
+                exponent = crypto.generate_dh_private_key()
 
                 """
                 Generate login message and encrypt with server public key
@@ -68,7 +60,7 @@ class Client:
                 payload_json = {
                     "username": uname,
                     "nonce": nonce,
-                    "dh_mod": pow(LOGIN_G, exponent, LOGIN_P)
+                    "modulo": pow(LOGIN_G, exponent, LOGIN_P)
                 }
                 payload_string = json.dumps(payload_json)
                 payload_bytes = payload_string.encode('ascii')
@@ -79,17 +71,22 @@ class Client:
                     "event": "auth_request",
                     "payload": payload_base64
                 }
-                s.sendall(util_funcs.pack_message(message_json, OP_LOGIN))
+                s.sendall(util_funcs.pack_message(message_json))
+                logger.debug(f"Send login request to server for {uname}")
 
                 """
                 Receive response and verify sign
                 """
-                response_json, _ = msg_processing.recv_msg(s)
+                msg = s.recv(4096)
+                response_json =json.loads(msg.decode())
+                print(f"Receive message {response_json}")
+                logger.debug(f"Receive challenge from server for {uname}")
                 if response_json.get("op_code") != OP_LOGIN or response_json.get("event") != "auth_request_challenge":
                     # invalid message
                     logger.debug(f"Invalid format response from server {response_json} in login process")
-                    raise ValueError("Server error")                
-                response_payload_json = json.loads(response_json[payload_json])
+                    raise ValueError("Server error")
+                logger.debug(f"Format of challenge from server is correct for {uname}")                
+                response_payload_json = json.loads(response_json["payload"])
                 argons_params_json = response_payload_json["argon2_params"]
                 encry_challenge_encoded = response_payload_json["challenge"]
                 server_sign_encoded = response_payload_json["argon2_params_signature"]
@@ -106,14 +103,26 @@ class Client:
                 """
                 Decrypt response and handle login result
                 """
+                hper = argon2.PasswordHasher(
+                    time_cost=argons_params_json["Time Cost"],
+                    memory_cost=argons_params_json["Memory Cost"],
+                    parallelism=argons_params_json["Parallelism"],
+                    salt_len=len(argons_params_json["Salt"])
+                )
+                decode_salt = base64.b64decode((argons_params_json["Salt"] + "==").encode('utf-8'))
+                hash_pswd = hper.hash(
+                    password=pswd, salt=decode_salt
+                )
+                """
                 hash_pswd = argon2.low_level.hash_secret_raw(
                     secret=pswd,
                     salt=argons_params_json["Salt"],
-                    time_cost=argons_params_json["Time_cost"],
-                    memory_cost=argons_params_json["Memory_cost"],
+                    time_cost=argons_params_json["Time Cost"],
+                    memory_cost=argons_params_json["Memory Cost"],
                     parallelism=argons_params_json["Parallelism"],
                     version=argons_params_json["Version"]
                 )
+                """
                 key_json = {
                     "nonce": nonce,
                     "password_hash": hash_pswd
@@ -177,13 +186,10 @@ class Client:
 
     def communicate(self, usname, message):
         pass
-        pass
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Secure Messaging")
-    parser.add_argument("-u", type=str, help="login username")
-    parser.add_argument("-p", type=str, help="login password")
     parser.add_argument("-u", type=str, help="login username")
     parser.add_argument("-p", type=str, help="login password")
     args = parser.parse_args()
