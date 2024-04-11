@@ -5,7 +5,6 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives import serialization
 
-
 """
 Some help functions
 """
@@ -14,6 +13,8 @@ Some help functions
 """
 Check signature
 """
+
+
 
 
 def check_signature(public_key, signature, message):

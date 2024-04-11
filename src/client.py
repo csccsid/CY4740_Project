@@ -1,9 +1,10 @@
 import argparse
+import argparse
 import base64
-import hashlib
 import json
 import logging
 import secrets
+import socket
 import socket
 import sys
 import time
@@ -21,6 +22,7 @@ SERVER_ADDRESS = "127.0.0.1"
 SERVER_PORT = 12345
 SERVER_PUBLIC_KEY_PATH = "../server_public_key.pem"
 LOGIN_P = 2 ** 768 - 2 ** 704 - 1 + 2 ** 64 * (int(2 ** 638 * pi) + 149686)
+LOGIN_P = 2 ** 768 - 2 ** 704 - 1 + 2 ** 64 * (int(2 ** 638 * pi) + 149686)
 LOGIN_G = 2
 
 OP_ERROR = 0
@@ -32,6 +34,7 @@ OP_MSG = 5
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(filename='client.log', encoding='utf-8', level=logging.DEBUG)
+
 
 
 class Client:
@@ -164,6 +167,7 @@ class Client:
     Connect to another user
     """
 
+
     def connect(self, usname):
         pass
 
@@ -171,12 +175,16 @@ class Client:
     Communicate with connected user
     """
 
+
     def communicate(self, usname, message):
+        pass
         pass
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Secure Messaging")
+    parser.add_argument("-u", type=str, help="login username")
+    parser.add_argument("-p", type=str, help="login password")
     parser.add_argument("-u", type=str, help="login username")
     parser.add_argument("-p", type=str, help="login password")
     args = parser.parse_args()
@@ -200,6 +208,7 @@ if __name__ == "__main__":
         Check active time
         """
         if datetime.now() - client.active_time > timedelta(minutes=10):
+        if datetime.now() - client.active_time > timedelta(minutes=10):
             # login time out
             client.login_status = False
             while True:
@@ -209,6 +218,7 @@ if __name__ == "__main__":
                 if client.login_status:
                     break
 
+
                 # pause a second to avoid consuming to much resource
                 time.sleep(1)
 
@@ -216,3 +226,4 @@ if __name__ == "__main__":
         Exchange message asynchronously
         """
         user_input = input("Connect to: ")
+
