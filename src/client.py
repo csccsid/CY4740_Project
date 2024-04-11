@@ -48,7 +48,6 @@ class Client:
         """
         self.active_time = datetime.now()
         self.connect_list = []
-        self.session_key = ""
         self.login_status = False
         self.server_dh_key = ""
         self.server_dh_iv = ""
@@ -161,7 +160,7 @@ class Client:
             print(f"Exception login: {e}")
             return False, None
 
-        return True, session_key
+        return True
 
     """
     Connect to another user
@@ -194,7 +193,7 @@ if __name__ == "__main__":
     """
     Login Server
     """
-    client.login_status, client.session_key = client.login(args.u, args.p)
+    client.login_status = client.login(args.u, args.p)
     if not client.login_status:
         # login fail
         print(f"Init login fail")
@@ -213,7 +212,7 @@ if __name__ == "__main__":
             while True:
                 uname = input("Login time out, please login again\nUsername:")
                 pswd = input("Password: ")
-                client.login_status, client.session_key = client.login(uname, pswd)
+                client.login_status = client.login(uname, pswd)
                 if client.login_status:
                     break
 
