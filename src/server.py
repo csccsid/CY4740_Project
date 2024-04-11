@@ -123,7 +123,7 @@ class TCPAuthServerProtocol(asyncio.Protocol):
 
             key_not_found_resp = {
                 "op_code": OP_ERROR,
-                "event": "KEY_NOT_FOUND",
+                "event": "key_not_found",
                 "payload": json.dumps(message)
             }
 

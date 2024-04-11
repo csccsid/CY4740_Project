@@ -3,7 +3,7 @@ import time
 from datetime import datetime, timedelta
 
 KEY_CHECK_INTERVAL = 30  # in seconds
-KEY_VALID_DURATION = 10  # in seconds
+KEY_VALID_DURATION = 1800  # in seconds
 
 
 class AuthenticationKeyManager:
