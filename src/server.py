@@ -88,13 +88,6 @@ class TCPAuthServerProtocol(asyncio.Protocol):
         async with self.lock:
             self.authenticated_users[username] = {"addr": addr, "dh_key": dh_key}
 
-    async def find_user_by_addr(self, addr):
-        async with self.lock:
-            for username, details in self.authenticated_users.items():
-                if details["addr"] == addr:
-                    return username, details["dh_key"]
-            return None, None  # If no user is found with the given addr
-
     async def modify_users_remove(self, username):
         async with self.lock:
             self.authenticated_users.pop(username, None)
@@ -136,9 +129,11 @@ class TCPAuthServerProtocol(asyncio.Protocol):
         Returns:
             None: Sends an encrypted response to the client and handles errors internally.
         """
-        username, dh_key = await self.find_user_by_addr(addr)
 
         list_request_payload_json = json.loads(message['payload'])
+
+        username = list_request_payload_json['username']
+        dh_key = self.authenticated_users.get(username)["dh_key"]
 
         list_request_payload_content = decrypt_with_dh_key(dh_key,
                                                            list_request_payload_json['ciphertext'],

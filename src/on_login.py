@@ -141,7 +141,7 @@ async def tcp_client(message, server_public_key, client_nonce, client_secret, ho
 
         list_payload_content = {"username": username}
         ciphertext_1, iv_1 = encrypt_with_dh_key(dh_key=dh_key, data=list_payload_content)
-        list_payload = {"ciphertext": ciphertext_1, "iv": iv_1}
+        list_payload = {"username": username, "ciphertext": ciphertext_1, "iv": iv_1}
         list_cmd = {"op_code": 4, "event": "LIST", "payload": json.dumps(list_payload)}
         list_json = json.dumps(list_cmd).encode()
         writer.write(list_json)
