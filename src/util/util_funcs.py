@@ -14,6 +14,8 @@ Some help functions
 """
 Check signature
 """
+
+
 def check_signature(public_key, signature, message):
     try:
         public_key.verify(
@@ -28,12 +30,14 @@ def check_signature(public_key, signature, message):
         return True
     except Exception as e:
         return False
-    
+
 
 """
 Help func to read the public/private key from files
 """
-def load_key(file_path, public):
+
+
+def load_key(file_path, public=True):
     try:
         with open(file_path, "rb") as key_file:
             if public:
@@ -53,7 +57,9 @@ def load_key(file_path, public):
 """
 Pack a package
 """
-def pack_message(message_json, op_cdde):
+
+
+def pack_message(message_json):
     message = json.dumps(message_json).encode()
-    total_length = 4 + 1 + len(message)
-    return struct.pack('!IB', total_length, op_cdde) + message
+    total_length = 4 + len(message)
+    return struct.pack('!I', total_length) + message
