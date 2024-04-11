@@ -208,7 +208,6 @@ if __name__ == "__main__":
         Check active time
         """
         if datetime.now() - client.active_time > timedelta(minutes=10):
-        if datetime.now() - client.active_time > timedelta(minutes=10):
             # login time out
             client.login_status = False
             while True:
