@@ -84,9 +84,9 @@ class TCPAuthServerProtocol(asyncio.Protocol):
             logger.error(f"Error processing message: {e}")
             self.transport.close()
 
-    async def modify_users(self, username, addr, dh_key):
+    async def modify_users(self, username, dh_key):
         async with self.lock:
-            self.authenticated_users[username] = {"addr": addr, "dh_key": dh_key}
+            self.authenticated_users[username] = {"dh_key": dh_key}
 
     async def modify_users_remove(self, username):
         async with self.lock:
@@ -259,20 +259,22 @@ class TCPAuthServerProtocol(asyncio.Protocol):
             # and obtain server_nonce
             if decrypted_json.get("server_nonce") == self.server_nonce:
                 response = {"op_code": OP_LOGIN, "event": "auth successful", "payload": ""}
+                self.transport.write(json.dumps(response).encode())
+                self.login_state = "AUTHENTICATED"  # Or reset to "AWAITING_AUTH_REQ" if failed
+                await self.modify_users(self.username, self.dh_key)
+                print(self.authenticated_users)
             else:
                 response = {"op_code": OP_LOGIN, "event": "auth failed", "payload": ""}
-
-            # notify client status of login
-            self.transport.write(json.dumps(response).encode())
-            self.login_state = "AUTHENTICATED"  # Or reset to "AWAITING_AUTH_REQ" if failed
-            await self.modify_users(self.username, addr, self.dh_key)
-            print(self.authenticated_users)
+                self.transport.write(json.dumps(response).encode())
+                print(f"Authentication failed, closing connection with {addr}")
+                self.transport.close()
 
         # wrong event during states or unexpected event
         else:
             # Unexpected message type or sequence
             error_msg = {"event": "error", "message": "Unexpected message or state."}
             self.transport.write(json.dumps(error_msg).encode())
+            self.transport.close()
 
     def connection_lost(self, exc):
         if exc:
