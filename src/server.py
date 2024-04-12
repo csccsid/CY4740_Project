@@ -17,6 +17,7 @@ from util.crypto import (
     sign_data
 )
 from util.db import db_connect
+from KeyManager import AuthenticationKeyManager
 
 OP_ERROR = 0
 OP_LOGIN = 1
@@ -48,7 +49,7 @@ def parse_arguments():
 
 
 class TCPAuthServerProtocol(asyncio.Protocol):
-    authenticated_users = {}
+    key_manager = AuthenticationKeyManager()
     lock = asyncio.Lock()
 
     def __init__(self):
@@ -84,31 +85,6 @@ class TCPAuthServerProtocol(asyncio.Protocol):
             logger.error(f"Error processing message: {e}")
             self.transport.close()
 
-    async def modify_users(self, username, addr, dh_key):
-        async with self.lock:
-            self.authenticated_users[username] = {"addr": addr, "dh_key": dh_key}
-
-    async def find_user_by_addr(self, addr):
-        async with self.lock:
-            for username, details in self.authenticated_users.items():
-                if details["addr"] == addr:
-                    return username, details["dh_key"]
-            return None, None  # If no user is found with the given addr
-
-    async def modify_users_remove(self, username):
-        async with self.lock:
-            self.authenticated_users.pop(username, None)
-
-    async def get_all_usernames(self):
-        """
-        Retrieves a list of all authenticated usernames.
-
-        Returns:
-        list: A list containing the usernames of all authenticated users.
-        """
-        async with self.lock:
-            return list(self.authenticated_users.keys())
-
     def on_cmd(self, message, addr):
         """
         Handle all the commands sent from client, and delegate them to specific handlers
@@ -136,20 +112,34 @@ class TCPAuthServerProtocol(asyncio.Protocol):
         Returns:
             None: Sends an encrypted response to the client and handles errors internally.
         """
-        username, dh_key = await self.find_user_by_addr(addr)
 
         list_request_payload_json = json.loads(message['payload'])
+
+        username = list_request_payload_json['username']
+        dh_key = self.key_manager.get_dh_key_by_username(username)
+
+        if dh_key is None:
+            print(f"No key found for {username}, user never logged in or key expired")
+
+            key_not_found_resp = {
+                "op_code": OP_ERROR,
+                "event": "key_not_found",
+                "payload": json.dumps(message)
+            }
+
+            self.transport.write(json.dumps(key_not_found_resp).encode('ascii'))
+            return
 
         list_request_payload_content = decrypt_with_dh_key(dh_key,
                                                            list_request_payload_json['ciphertext'],
                                                            list_request_payload_json['iv'])
 
         if username != list_request_payload_content["username"]:
-            print("Request username mismatch")
+            print(f"Request username mismatch, addr: {addr}")
             self.transport.close()
             self.__init__()
         else:
-            user_list = await self.get_all_usernames()
+            user_list = self.key_manager.get_all_usernames()
             user_list_cipher, user_list_iv = encrypt_with_dh_key(dh_key=self.dh_key, data=user_list)
 
             user_list_payload = {
@@ -162,7 +152,7 @@ class TCPAuthServerProtocol(asyncio.Protocol):
                 "payload": json.dumps(user_list_payload)
             }
 
-            print(f"Sent: {user_list_response}")
+            print(f"Sent: {user_list_response} to {addr} with username: {username}")
             self.transport.write(json.dumps(user_list_response).encode('ascii'))
 
     async def on_login(self, message, addr):
@@ -264,20 +254,22 @@ class TCPAuthServerProtocol(asyncio.Protocol):
             # and obtain server_nonce
             if decrypted_json.get("server_nonce") == self.server_nonce:
                 response = {"op_code": OP_LOGIN, "event": "auth successful", "payload": ""}
+                self.transport.write(json.dumps(response).encode())
+                self.login_state = "AUTHENTICATED"  # Or reset to "AWAITING_AUTH_REQ" if failed
+                self.key_manager.add_user(self.username, self.dh_key)
+                print(self.key_manager.get_all_usernames())
             else:
                 response = {"op_code": OP_LOGIN, "event": "auth failed", "payload": ""}
-
-            # notify client status of login
-            self.transport.write(json.dumps(response).encode())
-            self.login_state = "AUTHENTICATED"  # Or reset to "AWAITING_AUTH_REQ" if failed
-            await self.modify_users(self.username, addr, self.dh_key)
-            print(self.authenticated_users)
+                self.transport.write(json.dumps(response).encode())
+                print(f"Authentication failed, closing connection with {addr}")
+                self.transport.close()
 
         # wrong event during states or unexpected event
         else:
             # Unexpected message type or sequence
             error_msg = {"event": "error", "message": "Unexpected message or state."}
             self.transport.write(json.dumps(error_msg).encode())
+            self.transport.close()
 
     def connection_lost(self, exc):
         if exc:

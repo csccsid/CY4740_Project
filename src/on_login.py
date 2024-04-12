@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import os
+import time
 
 from argon2 import PasswordHasher
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -134,6 +135,9 @@ async def tcp_client(message, server_public_key, client_nonce, client_secret, ho
         data_1 = data.decode('ascii')
         print(data_1)
 
+        print("Sleep for 30 seconds")
+        time.sleep(30)
+
         #####################################
         # at this stage, if with the correct credentials, the user would be authenticated.
 
@@ -141,13 +145,14 @@ async def tcp_client(message, server_public_key, client_nonce, client_secret, ho
 
         list_payload_content = {"username": username}
         ciphertext_1, iv_1 = encrypt_with_dh_key(dh_key=dh_key, data=list_payload_content)
-        list_payload = {"ciphertext": ciphertext_1, "iv": iv_1}
+        list_payload = {"username": username, "ciphertext": ciphertext_1, "iv": iv_1}
         list_cmd = {"op_code": 4, "event": "LIST", "payload": json.dumps(list_payload)}
         list_json = json.dumps(list_cmd).encode()
         writer.write(list_json)
 
         data_2 = await reader.read(4096)
         data_2_decoded = data_2.decode('ascii')
+        print(data_2_decoded)
         data_2_decoded_json = json.loads(data_2_decoded)
         data_2_payload = json.loads(data_2_decoded_json["payload"])
 
@@ -156,6 +161,7 @@ async def tcp_client(message, server_public_key, client_nonce, client_secret, ho
                                              iv=data_2_payload['iv'])
         print(data_2_content)
 
+    writer.close()
     await writer.wait_closed()
 
 
