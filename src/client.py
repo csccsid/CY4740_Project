@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 import base64
 import json
 import logging
@@ -162,43 +163,66 @@ class Client:
 
         return True
 
-    """
-    Connect to another user
-    """
 
 
-    def connect(self, usname):
+"""
+Connect to another user
+"""
+class ClientCommunicationProtocol(asyncio.Protocol):
+    def __init__(self, client):
         pass
 
+
+
+"""
+Factory function
+"""
+def create_protocol(client):
+    return lambda: ClientCommunicationProtocol(client)
+
+
+
+async def main(client, cp):
     """
-    Communicate with connected user
+    Start client communication server
     """
+    loop = asyncio.get_running_loop()
+    client_server = await loop.create_server(
+        create_protocol(client),
+        '127.0.0.1', 
+        cp
+    )
 
-
-    def communicate(self, usname, message):
-        pass
-
+    async with client_server:
+        await client_server.serve_forever()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Secure Messaging")
-    parser.add_argument("-u", type=str, help="login username")
-    parser.add_argument("-p", type=str, help="login password")
+    parser.add_argument("-un", type=str, help="login username")
+    parser.add_argument("-pw", type=str, help="login password")
+    parser.add_argument("-cp", type=str, help="client communication port")
     args = parser.parse_args()
 
     client = Client()
 
     """
+    Start a server
+    """
+    try:
+        asyncio.run(main(client, args.cp))
+    except KeyboardInterrupt:
+        print('Server stopped manually')
+
+    """
     Login Server
     """
-    client.login_status = client.login(args.u, args.p)
+    client.login_status = client.login(args.un, args.pw)
     if not client.login_status:
         # login fail
         print(f"Init login fail")
         sys.exit(1)
     # login success
     client.active_time = datetime.now()
-
-
 
     while True:
 
@@ -222,5 +246,3 @@ if __name__ == "__main__":
         """
         Exchange message asynchronously
         """
-        user_input = input("Connect to: ")
-
