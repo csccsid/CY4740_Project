@@ -25,7 +25,7 @@ class Client:
     Client class for security messaging
     """
 
-    def init(self, cp):
+    def __init__(self, cp):
         """
         Init client class
         """
