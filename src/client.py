@@ -25,7 +25,7 @@ class Client:
     Client class for security messaging
     """
 
-    def init(self):
+    def init(self, cp):
         """
         Init client class
         """
@@ -34,6 +34,7 @@ class Client:
         self.login_status = False
         self.server_dh_key = ""
         self.server_dh_iv = ""
+        self.cp = cp
 
     def login(self, uname, pswd):
         try:
@@ -138,7 +139,8 @@ class Client:
                 """
                 self.server_dh_key = pow(server_mod, exponent, constant.P)
                 server_nonce_json = {
-                    "server_nonce": nonce2
+                    "server_nonce": nonce2,
+                    "client_server_port": self.cp
                 }
                 encrypted_nonce_encoded, dh_iv_encoded = crypto.encrypt_with_dh_key(dh_key=self.server_dh_key, data=server_nonce_json)
                 self.server_dh_iv = dh_iv_encoded
@@ -170,7 +172,9 @@ Connect to another user
 """
 class ClientCommunicationProtocol(asyncio.Protocol):
     def __init__(self, client):
-        pass
+        self.client = client
+    
+
 
 
 
@@ -179,7 +183,6 @@ Factory function
 """
 def create_protocol(client):
     return lambda: ClientCommunicationProtocol(client)
-
 
 
 async def main(client, cp):
@@ -203,15 +206,8 @@ if __name__ == "__main__":
     parser.add_argument("-cp", type=str, help="client communication port")
     args = parser.parse_args()
 
-    client = Client()
+    client = Client(args.cp)
 
-    """
-    Start a server
-    """
-    try:
-        asyncio.run(main(client, args.cp))
-    except KeyboardInterrupt:
-        print('Server stopped manually')
 
     """
     Login Server
@@ -224,25 +220,11 @@ if __name__ == "__main__":
     # login success
     client.active_time = datetime.now()
 
-    while True:
 
-        """
-        Check active time
-        """
-        if datetime.now() - client.active_time > timedelta(minutes=10):
-            # login time out
-            client.login_status = False
-            while True:
-                uname = input("Login time out, please login again\nUsername:")
-                pswd = input("Password: ")
-                client.login_status = client.login(uname, pswd)
-                if client.login_status:
-                    break
-
-
-                # pause a second to avoid consuming to much resource
-                time.sleep(1)
-
-        """
-        Exchange message asynchronously
-        """
+    """
+    Start a server
+    """
+    try:
+        asyncio.run(main(client, args.cp))
+    except KeyboardInterrupt:
+        print('Server stopped manually')
