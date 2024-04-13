@@ -140,7 +140,7 @@ class Client:
                 self.server_dh_key = pow(server_mod, exponent, constant.P)
                 server_nonce_json = {
                     "server_nonce": nonce2,
-                    "client_server_port": self.cp
+                    "client_service_port": self.cp
                 }
                 encrypted_nonce_encoded, dh_iv_encoded = crypto.encrypt_with_dh_key(dh_key=self.server_dh_key, 
                                                                                     data=server_nonce_json)
@@ -155,6 +155,13 @@ class Client:
                     "payload": json.dumps(chal_resp_payload)
                 }
                 s.sendall(util_funcs.pack_message(message_json))
+
+                """
+                Optional
+                """
+                msg = s.recv(4096)
+                print(msg.decode('ascii'))
+
 
         except (socket.error, ConnectionError, ConnectionResetError) as e:
             logger.debug(f"Exception login: {e}")
