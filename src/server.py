@@ -252,12 +252,15 @@ class TCPAuthServerProtocol(asyncio.Protocol):
 
             # client should be able to use the password derived key to decrypt payload
             # and obtain server_nonce
-            if decrypted_json.get("server_nonce") == self.server_nonce:
-                response = {"op_code": OP_LOGIN, "event": "auth successful", "payload": ""}
-                self.transport.write(json.dumps(response).encode())
-                self.login_state = "AUTHENTICATED"  # Or reset to "AWAITING_AUTH_REQ" if failed
-                self.key_manager.add_user(self.username, self.dh_key)
-                print(self.key_manager.get_all_usernames())
+            if decrypted_json.get("server_nonce") == self.server_nonce and decrypted_json.get("client_service_port"):
+                try:
+                    self.key_manager.add_user(self.username, self.dh_key, decrypted_json.get("client_service_port"))
+                    print(self.key_manager.get_all_usernames())
+                finally:
+                    response = {"op_code": OP_LOGIN, "event": "auth successful", "payload": ""}
+                    self.transport.write(json.dumps(response).encode())
+                    self.login_state = "AUTHENTICATED"  # Or reset to "AWAITING_AUTH_REQ" if failed
+
             else:
                 response = {"op_code": OP_LOGIN, "event": "auth failed", "payload": ""}
                 self.transport.write(json.dumps(response).encode())
