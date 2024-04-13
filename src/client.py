@@ -152,7 +152,7 @@ class Client:
                 message_json = {
                     "op_code": constant.OP_LOGIN,
                     "event": "challenge_response",
-                    "payload": chal_resp_payload
+                    "payload": json.dumps(chal_resp_payload)
                 }
                 s.sendall(util_funcs.pack_message(message_json))
 
@@ -185,7 +185,7 @@ async def list_request(client):
             Send list request encrypted with session dh key
             """
             ciphertext_encoded, dh_iv_encoded = crypto.encrypt_with_dh_key(
-                dh_key=client.server_dh_key, data=client.login_uname)
+                dh_key=client.server_dh_key, data={"username": client.login_uname})
             auth_json = {
                 "username": client.login_uname,
                 "ciphertext": ciphertext_encoded,
@@ -210,6 +210,7 @@ async def list_request(client):
                 ("payload" not in response_json)):
                 # receive invalid message
                 logger.debug(f"Invalid format response from server {response_json} for list request")
+                print("KDCerror")
                 raise ValueError("Server error")
             
             payload_json = json.loads(response_json["payload"])
@@ -219,7 +220,7 @@ async def list_request(client):
             logger.debug(f"Complete list request")
             print(f"users list: {user_list}")
 
-    except (socket.error, ConnectionError, ConnectionResetError) as e:
+    except (socket.error, ConnectionError, ConnectionResetError, Exception) as e:
             logger.debug(f"Exception request list: {e}")
 
 """
@@ -255,8 +256,8 @@ async def handle_input(client):
                 case "send":
                     # start communication with another client
                     pass
-        except (socket.error, ConnectionError, ConnectionResetError) as e:
-            logger.debug(f"Exception login: {e}")
+        except (socket.error, ConnectionError, ConnectionResetError, Exception ) as e:
+            logger.debug(f"Exception input: {e}")
 
 
 """

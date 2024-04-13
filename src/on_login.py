@@ -107,7 +107,7 @@ async def tcp_client(message, server_public_key, client_nonce, client_secret, ho
         server_nonce = challenge_result_json["server_nonce"]
         server_modulo = challenge_result_json["server_modulo"]
 
-        challenge_resp = {"server_nonce": server_nonce}
+        challenge_resp = {"server_nonce": server_nonce, "client_server_port": 22}
 
         dh_key = pow(server_modulo, client_secret, PRIME)
         bytes_length = (dh_key.bit_length() + 7) // 8  # Calculate the number of bytes needed

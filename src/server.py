@@ -117,8 +117,8 @@ class TCPAuthServerProtocol(asyncio.Protocol):
 
         username = list_request_payload_json['username']
         dh_key = self.key_manager.get_dh_key_by_username(username)
-
         if dh_key is None:
+            print(self.key_manager.get_all_usernames())
             print(f"No key found for {username}, user never logged in or key expired")
 
             key_not_found_resp = {
@@ -252,8 +252,12 @@ class TCPAuthServerProtocol(asyncio.Protocol):
 
             # client should be able to use the password derived key to decrypt payload
             # and obtain server_nonce
-            if decrypted_json.get("server_nonce") == self.server_nonce and decrypted_json.get("client_service_port"):
+            print(decrypted_json)
+            if (decrypted_json.get("server_nonce") == self.server_nonce 
+                and decrypted_json.get("client_service_port") < 65536
+                and decrypted_json.get("client_service_port") > 0):
                 try:
+                    print("here")
                     self.key_manager.add_user(self.username, self.dh_key, decrypted_json.get("client_service_port"))
                     print(self.key_manager.get_all_usernames())
                 finally:
@@ -262,6 +266,7 @@ class TCPAuthServerProtocol(asyncio.Protocol):
                     self.login_state = "AUTHENTICATED"  # Or reset to "AWAITING_AUTH_REQ" if failed
 
             else:
+                print("here")
                 response = {"op_code": OP_LOGIN, "event": "auth failed", "payload": ""}
                 self.transport.write(json.dumps(response).encode())
                 print(f"Authentication failed, closing connection with {addr}")
