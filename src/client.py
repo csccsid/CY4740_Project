@@ -220,7 +220,7 @@ async def list_request(client):
                 ("payload" not in response_json)):
                 # receive invalid message
                 logger.debug(f"Invalid format response from server {response_json} for list request")
-                print("KDCerror")
+                print("KDC error")
                 raise ValueError("Server error")
             
             payload_json = json.loads(response_json["payload"])

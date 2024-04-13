@@ -133,14 +133,14 @@ class TCPAuthServerProtocol(asyncio.Protocol):
         list_request_payload_content = decrypt_with_dh_key(dh_key,
                                                            list_request_payload_json['ciphertext'],
                                                            list_request_payload_json['iv'])
-
+        print(username)
         if username != list_request_payload_content["username"]:
             print(f"Request username mismatch, addr: {addr}")
             self.transport.close()
             self.__init__()
         else:
             user_list = self.key_manager.get_all_usernames()
-            user_list_cipher, user_list_iv = encrypt_with_dh_key(dh_key=self.dh_key, data=user_list)
+            user_list_cipher, user_list_iv = encrypt_with_dh_key(dh_key=dh_key, data=user_list)
 
             user_list_payload = {
                 "ciphertext": user_list_cipher,
