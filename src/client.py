@@ -124,12 +124,10 @@ class Client:
 
                 if challenge["client_nonce"] != nonce:
                     # wrong password
-                    logger.debug("Wrong password")
+                    logger.debug(f"Wrong password of {uname}")
                     raise ValueError("Wrong password")
-                # login success
-                logger.debug(f"Login of {uname} success")
-                self.login_uname = uname
-                print(f"Login success {uname}!")
+                # correct password
+                logger.debug(f"Correct password of {uname}")
 
                 server_mod = challenge["server_modulo"]
                 nonce2 = challenge["server_nonce"]
@@ -157,11 +155,16 @@ class Client:
                 s.sendall(util_funcs.pack_message(message_json))
 
                 """
-                Optional
+                Last part of login
                 """
                 msg = s.recv(4096)
-                print(msg.decode('ascii'))
-
+                last_response_json = json.loads(msg.decode())
+                if (last_response_json.get('op_code') == constant.OP_LOGIN
+                    and last_response_json.get('event') == "auth successful"):
+                    # login success
+                    logger.debug(f"Login of {uname} success")
+                    self.login_uname = uname
+                    print(f"Login success {uname}!")
 
         except (socket.error, ConnectionError, ConnectionResetError) as e:
             logger.debug(f"Exception login: {e}")

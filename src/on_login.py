@@ -110,6 +110,7 @@ async def tcp_client(message, server_public_key, client_nonce, client_secret, ho
         challenge_resp = {"server_nonce": server_nonce, "client_service_port": 22}
 
         dh_key = pow(server_modulo, client_secret, PRIME)
+        """
         bytes_length = (dh_key.bit_length() + 7) // 8  # Calculate the number of bytes needed
         dh_key_bytes = dh_key.to_bytes(bytes_length, byteorder='big')
         hash_object = hashlib.sha256(dh_key_bytes)
@@ -124,7 +125,9 @@ async def tcp_client(message, server_public_key, client_nonce, client_secret, ho
 
         chal_ciphertext_encoded = base64.b64encode(chal_ciphertext).decode('ascii')
         chal_iv_encoded = base64.b64encode(chal_iv).decode('ascii')
-
+        """
+        
+        chal_ciphertext_encoded, chal_iv_encoded = encrypt_with_dh_key(dh_key, challenge_resp)
         chal_resp_content = {"ciphertext": chal_ciphertext_encoded, "iv": chal_iv_encoded}
         chal_resp = {"op_code": 1, "event": "challenge_response", "payload": json.dumps(chal_resp_content)}
         chal_resp_json = json.dumps(chal_resp)
