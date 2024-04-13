@@ -14,13 +14,14 @@ class AuthenticationKeyManager:
         self.stopped = False
         threading.Thread(target=self.expire_keys_task).start()
 
-    def add_user(self, username, dh_key, ttl_seconds=KEY_VALID_DURATION):
+    def add_user(self, username, dh_key, client_service_port, ttl_seconds=KEY_VALID_DURATION):
         """Add a new user with a specified TTL (time to live in seconds)."""
         expiry_time = datetime.now() + timedelta(seconds=ttl_seconds)
         with self.lock:
             self.authenticated_users[username] = {
                 'dh_key': dh_key,
-                'expiry_time': expiry_time
+                'expiry_time': expiry_time,
+                'client_service_port': client_service_port
             }
 
     def remove_user(self, username):
