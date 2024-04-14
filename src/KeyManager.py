@@ -52,7 +52,7 @@ class AuthenticationKeyManager:
                 return None  # Or raise an exception if preferred
             
     def get_addr_by_username(self, username):
-        """Retrieve the usaer info for a specific username."""
+        """Retrieve the user info for a specific username."""
         with self.lock:
             if username in self.authenticated_users:
                 return (self.authenticated_users[username]['client_service_addr'], 
