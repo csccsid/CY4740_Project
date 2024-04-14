@@ -34,7 +34,7 @@ class Client:
         Init client class
         """
         self.active_time = datetime.now()
-        self.connect_list = []
+        self.users_list = {}
         self.login_status = False
         self.login_uname = ""
         self.server_dh_key = ""
@@ -171,7 +171,8 @@ class Client:
                     # login success
                     logger.debug(f"Login of {uname} success")
                     self.login_uname = uname
-                    self.key_manager.add_user("KDC", self.server_dh_key, constant.SERVER_PORT)
+                    self.key_manager.add_user("KDC", self.server_dh_key, 
+                                              constant.SERVER_ADDRESS, constant.SERVER_PORT)
                     print(f"Login success {uname}!")
 
         except (socket.error, ConnectionError, ConnectionResetError) as e:
@@ -268,7 +269,7 @@ class ClientCommunicationProtocol(asyncio.Protocol):
             decrypted_json = crypto.decrypt_with_dh_key(dh_key=self.dh_key,
                                                  cipher_text=payload_json["ciphertext"],
                                                  iv=payload_json["iv"])
-            print(f"Receive message {decrypted_json.get("msg")} from {payload_json.get("username")}")
+            print(f"Receive message {decrypted_json['msg']} from {payload_json['username']}")
 
 
     def connection_lost(self, exc):
@@ -291,13 +292,20 @@ Send list reqest to KDC
 """
 async def list_request(client):
     try:
+        temp_dh_key = None
+        temp_login_uname = ""
+        async with lock:
+            temp_dh_key = client.key_manager.get_dh_key_by_username("KDC")
+            temp_login_uname = client.login_uname
+
+        if temp_dh_key is None:
+            # login time out
+            print("Login timed out")
+            raise ValueError("Login timed out")
+
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.connect((constant.SERVER_ADDRESS, constant.SERVER_PORT))
-            logger.debug(f"Connect to server for {client.login_uname} list request")
-            async with lock:
-                temp_dh_key = client.server_dh_key
-                temp_login_uname = client.login_uname
-
+            logger.debug(f"Connect to server for {temp_login_uname} list request")
 
             """
             Send list request encrypted with session dh key
@@ -332,11 +340,11 @@ async def list_request(client):
                 raise ValueError("Server error")
             
             payload_json = json.loads(response_json["payload"])
-            user_list = crypto.decrypt_with_dh_key(temp_dh_key, 
+            user_json_list = crypto.decrypt_with_dh_key(temp_dh_key, 
                                                    payload_json['ciphertext'], 
                                                    payload_json['iv'])
             logger.debug(f"Complete list request")
-            print(f"users list: {user_list}")
+            return user_json_list
 
     except (socket.error, ConnectionError, ConnectionResetError, Exception) as e:
             logger.debug(f"Exception request list: {e}")
@@ -347,23 +355,42 @@ Send message in communication
 """
 async def send_comm_message(client, destination, message_text):
     try:
-            connected_list = client.key_manager.get_all_usernames()
-            if destination not in connected_list:
-                print(f"Have not connected to user {destination} or key expired")
-                raise ValueError(f"Have not connected to user {destination} or key expired")
             
-            dest_python = connected_list[destination]
+            destination_dh_key = client.key_manager.get_dh_key_by_username(destination)
+            #dest_addr, dest_port = client.key_manager.get_addr_by_username(destination)
+            if destination_dh_key is None:
+                # have not connected yet
+
+                # check users_list
+                temp_users_list = {}
+                async with lock:
+                    temp_users_list = client.users_list
+                destination_info = temp_users_list.get(destination)
+                if destination_info is None:
+                    # not in client users_list, update users_list by KDC's version
+                    temp_users_list = await list_request(client)
+                    async with lock:
+                        client.users_list = temp_users_list
+                    destination_info = temp_users_list.get(destination)
+
+                    # check updated users_list
+                    if destination_info is None:
+                        # destination has not logined
+                        print(f"{destination} has not logined, cannot send message to it")
+                        raise ValueError(f"Failed to send message to {destination} who has not logined")
+
             temp_username = ""
             async with lock:
                 temp_username = client.login_uname
 
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.connect((dest_python['addr'], dest_python['client_service_port']))
+                s.connect((destination_info['client_service_addr'], 
+                           destination_info['client_service_port']))
                 logger.debug(f"Connect to server for {destination} login")
 
                 
                 msg_json = {"msg": message_text}
-                msg_cipher, send_msg_iv = crypto.encrypt_with_dh_key(dh_key=dest_python['dh_key'], 
+                msg_cipher, send_msg_iv = crypto.encrypt_with_dh_key(dh_key=temp_dh_key, 
                                                                       data=msg_json)
                 payload_json = {
                     "username": temp_username,
@@ -405,8 +432,6 @@ async def check_status(client):
                 # pause a second to avoid consuming to much resource
                 time.sleep(1)
         
-        #TODO: check active time of each connected clients
-
 
 """
 Handle user input command
@@ -418,7 +443,8 @@ async def handle_input(client):
             match input_cmd[0]:
                 case  "list":
                     # send list request to KDC
-                    await list_request(client)
+                    user_json_list = await list_request(client)
+                    print(f"users list: {list(user_json_list.keys())}")
                     
                 case "send":
                     # start communication with another client

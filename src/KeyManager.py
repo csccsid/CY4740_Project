@@ -14,13 +14,14 @@ class AuthenticationKeyManager:
         self.stopped = False
         threading.Thread(target=self.expire_keys_task).start()
 
-    def add_user(self, username, dh_key, client_service_port, ttl_seconds=KEY_VALID_DURATION):
+    def add_user(self, username, dh_key, client_service_addr, client_service_port, ttl_seconds=KEY_VALID_DURATION):
         """Add a new user with a specified TTL (time to live in seconds)."""
         expiry_time = datetime.now() + timedelta(seconds=ttl_seconds)
         with self.lock:
             self.authenticated_users[username] = {
                 'dh_key': dh_key,
                 'expiry_time': expiry_time,
+                'client_service_addr': client_service_addr,
                 'client_service_port': client_service_port
             }
 
@@ -34,6 +35,13 @@ class AuthenticationKeyManager:
         """Return a list of all usernames currently stored."""
         with self.lock:
             return list(self.authenticated_users.keys())
+    
+    def get_all_users(self):
+        """Return all users currently stored."""
+        with self.lock:
+            return {user: {'client_service_addr': value['client_service_addr'],
+                           'client_service_port': value['client_service_port']} 
+                    for user, value in self.authenticated_users.items()}
 
     def get_dh_key_by_username(self, username):
         """Retrieve the Diffie-Hellman key for a specific username."""

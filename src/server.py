@@ -139,8 +139,8 @@ class TCPAuthServerProtocol(asyncio.Protocol):
             self.transport.close()
             self.__init__()
         else:
-            user_list = self.key_manager.get_all_usernames()
-            user_list_cipher, user_list_iv = encrypt_with_dh_key(dh_key=dh_key, data=user_list)
+            user_json_list = self.key_manager.get_all_users()
+            user_list_cipher, user_list_iv = encrypt_with_dh_key(dh_key=dh_key, data=user_json_list)
 
             user_list_payload = {
                 "ciphertext": user_list_cipher,
@@ -254,7 +254,7 @@ class TCPAuthServerProtocol(asyncio.Protocol):
             # and obtain server_nonce
             if decrypted_json.get("server_nonce") == self.server_nonce and decrypted_json.get("client_service_port"):
                 try:
-                    self.key_manager.add_user(self.username, self.dh_key, decrypted_json.get("client_service_port"))
+                    self.key_manager.add_user(self.username, self.dh_key, addr[0], decrypted_json.get("client_service_port"))
                     print(self.key_manager.get_all_usernames())
                 finally:
                     response = {"op_code": OP_LOGIN, "event": "auth successful", "payload": ""}
