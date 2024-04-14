@@ -280,10 +280,6 @@ class TCPAuthServerProtocol(asyncio.Protocol):
         else:
             print("Connection closed by client.")
 
-        # TODO: also make sure to remove user from the authenticated user list
-        # this is commented out for testing purposes.
-        # if self.username in self.authenticated_users:
-        #     asyncio.create_task(self.modify_users_remove(self.username))
         self.__init__()
         print("Client info reset completed")
         super().connection_lost(exc)
