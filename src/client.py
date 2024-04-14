@@ -8,6 +8,7 @@ import sys
 import time
 from datetime import datetime, timedelta
 import argon2
+from KeyManager import AuthenticationKeyManager
 import constant
 
 from util import util_funcs, crypto
@@ -18,12 +19,15 @@ SERVER_PUBLIC_KEY_PATH = "../server_public_key.pem"
 logger = logging.getLogger(__name__)
 logging.basicConfig(filename='client.log', encoding='utf-8', level=logging.DEBUG)
 
+lock = None
+
 
 
 class Client:
     """
     Client class for security messaging
     """
+    key_manager = AuthenticationKeyManager()
 
     def __init__(self, cp):
         """
@@ -36,6 +40,9 @@ class Client:
         self.server_dh_key = ""
         #self.server_dh_iv = ""
         self.cp = cp
+
+    async def reset(self):
+        pass
 
     def login(self, uname, pswd):
         try:
@@ -164,6 +171,7 @@ class Client:
                     # login success
                     logger.debug(f"Login of {uname} success")
                     self.login_uname = uname
+                    self.key_manager.add_user("KDC", self.server_dh_key, constant.SERVER_PORT)
                     print(f"Login success {uname}!")
 
         except (socket.error, ConnectionError, ConnectionResetError) as e:
@@ -179,7 +187,103 @@ Communicate with other users
 """
 class ClientCommunicationProtocol(asyncio.Protocol):
     def __init__(self, client):
+        super().__init__()
         self.client = client
+        self.auth_status = "AWAITING_AUTH_REQ"
+
+    
+    def connection_made(self, transport):
+        self.transport = transport
+        peername = transport.get_extra_info('peername')
+        logger.debug(f"Connection from {peername}")
+
+    
+    def data_received(self, data):
+        message = json.loads(data.decode())
+        addr = self.transport.get_extra_info('peername')
+        logger.debug(f"Service received message from {addr}: {message}")
+        asyncio.create_task(self.process_message(message, addr))
+
+
+    async def process_message(self, message, addr):
+        try:
+            match message.get('op_code'):
+                case constant.OP_AUTH:
+                    await self.on_auth(message, addr)
+
+                case constant.OP_MSG:
+                    await self.recv_comm_message(message)
+
+        except Exception as e:
+            logger.error(f"Error processing message: {e}")
+            self.transport.close()
+        
+
+    """
+    Communication between clients auth process
+    """
+    async def on_auth(self, message, addr):
+        payload_json = message.get('payload')
+        # check message format
+        if("nonce" not in payload_json or
+           "comm_source" not in payload_json or
+           "comm_recv" not in payload_json or
+           "ciphertext" not in payload_json):
+            # invalid format
+            raise ValueError(f"Invalid communication init format {payload_json}")
+        
+        server_kh_key = None
+        recv_name = ""
+        async with lock:
+            server_kh_key = self.client.server_dh_key
+            recv_name = self.client.login_uname
+
+        if self.auth_status == "AWAITING_AUTH_REQ" and message.get("event") == "comm_init":
+            # check comm_recv
+            if payload_json.get("comm_recv") != recv_name:
+                raise ValueError(f"Invalid communication receiver {payload_json}")
+            
+            ciphertext_recv_json = {
+                "recv_nonce": recv_name
+            }
+
+        elif self.auth_status == "AWAITING_AUTH_KEY_EST" and message.get("event") == "comm_key_init" :
+            pass
+
+        else:
+            logger.debug(f"invalid message {message} from {addr}")
+            raise ValueError(f"Invalid message from {addr}")
+        
+
+    """
+    Func to receive communication message
+    """
+    def recv_comm_message(self, message):
+        payload_json = message.get("payload")
+        dh_key = self.key_manager.get_dh_key_by_username(payload_json.get("username"))
+        if dh_key is None:
+            raise ValueError("Receive message from user never connected or key expired")
+        
+        if message.get("event") == "send_msg":
+            decrypted_json = crypto.decrypt_with_dh_key(dh_key=self.dh_key,
+                                                 cipher_text=payload_json["ciphertext"],
+                                                 iv=payload_json["iv"])
+            print(f"Receive message {decrypted_json.get("msg")} from {payload_json.get("username")}")
+
+
+    def connection_lost(self, exc):
+        if exc:
+            print(f"Error on connection: {exc}")
+        else:
+            print("Connection closed by client.")
+
+        # TODO: also make sure to remove user from the authenticated user list
+        # this is commented out for testing purposes.
+        # if self.username in self.authenticated_users:
+        #     asyncio.create_task(self.modify_users_remove(self.username))
+        self.__init__()
+        print("Client info reset completed")
+        super().connection_lost(exc)
 
 
 """
@@ -190,14 +294,18 @@ async def list_request(client):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.connect((constant.SERVER_ADDRESS, constant.SERVER_PORT))
             logger.debug(f"Connect to server for {client.login_uname} list request")
+            async with lock:
+                temp_dh_key = client.server_dh_key
+                temp_login_uname = client.login_uname
+
 
             """
             Send list request encrypted with session dh key
             """
             ciphertext_encoded, dh_iv_encoded = crypto.encrypt_with_dh_key(
-                dh_key=client.server_dh_key, data={"username": client.login_uname})
+                dh_key=temp_dh_key, data={"username": temp_login_uname})
             auth_json = {
-                "username": client.login_uname,
+                "username": temp_login_uname,
                 "ciphertext": ciphertext_encoded,
                 "iv": dh_iv_encoded
             }
@@ -214,7 +322,7 @@ async def list_request(client):
             """
             msg = s.recv(4096)
             response_json =json.loads(msg.decode())
-            logger.debug(f"Receive list response {response_json} from server for {client.login_uname}")
+            logger.debug(f"Receive list response {response_json} from server for {temp_login_uname}")
             if (response_json.get("op_code") != constant.OP_CMD or 
                 response_json.get("event") != "LIST_RESP" or 
                 ("payload" not in response_json)):
@@ -224,7 +332,7 @@ async def list_request(client):
                 raise ValueError("Server error")
             
             payload_json = json.loads(response_json["payload"])
-            user_list = crypto.decrypt_with_dh_key(client.server_dh_key, 
+            user_list = crypto.decrypt_with_dh_key(temp_dh_key, 
                                                    payload_json['ciphertext'], 
                                                    payload_json['iv'])
             logger.debug(f"Complete list request")
@@ -233,22 +341,71 @@ async def list_request(client):
     except (socket.error, ConnectionError, ConnectionResetError, Exception) as e:
             logger.debug(f"Exception request list: {e}")
 
+
 """
-Check login status
+Send message in communication
+"""
+async def send_comm_message(client, destination, message_text):
+    try:
+            connected_list = client.key_manager.get_all_usernames()
+            if destination not in connected_list:
+                print(f"Have not connected to user {destination} or key expired")
+                raise ValueError(f"Have not connected to user {destination} or key expired")
+            
+            dest_python = connected_list[destination]
+            temp_username = ""
+            async with lock:
+                temp_username = client.login_uname
+
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.connect((dest_python['addr'], dest_python['client_service_port']))
+                logger.debug(f"Connect to server for {destination} login")
+
+                
+                msg_json = {"msg": message_text}
+                msg_cipher, send_msg_iv = crypto.encrypt_with_dh_key(dh_key=dest_python['dh_key'], 
+                                                                      data=msg_json)
+                payload_json = {
+                    "username": temp_username,
+                    "ciphertext": msg_cipher,
+                    "iv": send_msg_iv
+                }
+                message_json = {
+                    "op_code": constant.OP_MSG,
+                    "event": "send_msg",
+                    "payload": payload_json
+                }
+                s.sendall(util_funcs.pack_message(message_json))
+                logger.debug(f"sent {send_msg_iv} to {destination}")    
+    
+    except (socket.error, ConnectionError, ConnectionResetError, Exception) as e:
+        print(f"Failed to send message to {destination}")
+        logger.debug(f"Exception sending message: {e}")
+
+"""
+Check login status and connected status
 """
 async def check_status(client):
     while True:
-        if datetime.now() - client.active_time > timedelta(minutes=10):
+        async with lock:
+            active_time_temp = client.active_time
+
+        if datetime.now() - active_time_temp > timedelta(minutes=10):
             # login time out
-            client.login_status = False
+            async with lock:
+                client.login_status = False
+
             while True:
                 uname = input("Login time out, please login again\nUsername:")
                 pswd = input("Password: ")
-                client.login_status = client.login(uname, pswd)
-                if client.login_status:
-                    break
+                async with lock:
+                    client.login_status = client.login(uname, pswd)
+                    if client.login_status:
+                        break
                 # pause a second to avoid consuming to much resource
                 time.sleep(1)
+        
+        #TODO: check active time of each connected clients
 
 
 """
@@ -256,16 +413,16 @@ Handle user input command
 """
 async def handle_input(client):
     while True:
-        input_cmd = input()
+        input_cmd = input().split()
         try: 
-            match input_cmd:
+            match input_cmd[0]:
                 case  "list":
                     # send list request to KDC
                     await list_request(client)
                     
                 case "send":
                     # start communication with another client
-                    pass
+                    await send_comm_message(client, input_cmd[1], input_cmd[2])
         except (socket.error, ConnectionError, ConnectionResetError, Exception ) as e:
             logger.debug(f"Exception input: {e}")
 
@@ -302,6 +459,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     client = Client(args.cp)
+    lock = asyncio.Lock()
 
 
     """

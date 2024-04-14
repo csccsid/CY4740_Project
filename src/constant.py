@@ -17,6 +17,11 @@ Server config
 SERVER_ADDRESS = "127.0.0.1"
 SERVER_PORT = 12345
 
+"""
+Client config
+"""
+CLIENT_SERVICE_PORT = 10001
+
 
 """
 Diffie–Hellman key config
