@@ -48,6 +48,7 @@ class Client:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.connect((constant.SERVER_ADDRESS, constant.SERVER_PORT))
+                s.settimeout(10.0) # set socket time out in 10 second
                 logger.debug(f"Connect to server for {uname} login")
 
                 server_public_key = util_funcs.load_key(SERVER_PUBLIC_KEY_PATH, True)
@@ -175,8 +176,13 @@ class Client:
                                               constant.SERVER_ADDRESS, constant.SERVER_PORT)
                     print(f"Login success {uname}!")
 
+        except socket.timeout:
+            print("No data received within the time limit, closing socket.")
+            s.close()
+
         except (socket.error, ConnectionError, ConnectionResetError) as e:
             logger.debug(f"Exception login: {e}")
+            s.close()
             return False
 
         return True
@@ -191,10 +197,14 @@ class ClientCommunicationProtocol(asyncio.Protocol):
         super().__init__()
         self.client = client
         self.auth_status = "AWAITING_AUTH_REQ"
+        self.channel_key = None
+        self.timeout = 20 # time out in 20 second
+        self.timeout_handle = None
 
     
     def connection_made(self, transport):
         self.transport = transport
+        self.reset_timeout()
         peername = transport.get_extra_info('peername')
         logger.debug(f"Connection from {peername}")
 
@@ -204,6 +214,21 @@ class ClientCommunicationProtocol(asyncio.Protocol):
         addr = self.transport.get_extra_info('peername')
         logger.debug(f"Service received message from {addr}: {message}")
         asyncio.create_task(self.process_message(message, addr))
+    
+
+    def reset_timeout(self):
+        if self.timeout_handle:
+            self.timeout_handle.cancel() 
+        self.timeout_handle = asyncio.get_event_loop().call_later(
+            self.timeout, self.on_timeout)
+        
+
+    """
+    Time out setting to prevent DOS
+    """
+    def on_timeout(self):
+        print("Connection timed out, closing.")
+        self.transport.close()
 
 
     async def process_message(self, message, addr):
@@ -217,6 +242,11 @@ class ClientCommunicationProtocol(asyncio.Protocol):
 
         except Exception as e:
             logger.error(f"Error processing message: {e}")
+            self.transport.write(util_funcs.pack_message({
+                "op_code": constant.OP_ERROR,
+                "event": "error",
+                "payload": ""
+            }))
             self.transport.close()
         
 
@@ -224,33 +254,111 @@ class ClientCommunicationProtocol(asyncio.Protocol):
     Communication between clients auth process
     """
     async def on_auth(self, message, addr):
-        payload_json = message.get('payload')
+        recv_payload_json = message.get('payload')
         # check message format
-        if("nonce" not in payload_json or
-           "comm_source" not in payload_json or
-           "comm_recv" not in payload_json or
-           "ciphertext" not in payload_json):
+        if("nonce" not in recv_payload_json or
+           "comm_source" not in recv_payload_json or
+           "comm_recv" not in recv_payload_json or
+           "ciphertext" not in recv_payload_json):
             # invalid format
-            raise ValueError(f"Invalid communication init format {payload_json}")
+            raise ValueError(f"Invalid communication init format {recv_payload_json}")
         
-        server_kh_key = None
+        server_dh_key = None
         recv_name = ""
         async with lock:
-            server_kh_key = self.client.server_dh_key
+            server_dh_key = self.client.server_dh_key
             recv_name = self.client.login_uname
 
         if self.auth_status == "AWAITING_AUTH_REQ" and message.get("event") == "comm_init":
             # check comm_recv
-            if payload_json.get("comm_recv") != recv_name:
-                raise ValueError(f"Invalid communication receiver {payload_json}")
+            if recv_payload_json.get("comm_recv") != recv_name:
+                raise ValueError(f"Invalid communication receiver {recv_payload_json}")
             
+            """
+            Receive and Forward auth request
+            """
+            nonce = recv_payload_json['nonce']
+            recv_nonce = crypto.generate_nonce()
             ciphertext_recv_json = {
-                "recv_nonce": recv_name
+                "recv_nonce": recv_nonce,
+                "nonce": nonce,
+                "comm_source": recv_payload_json['comm_source'],
+                "comm_recv": recv_name
+            }
+            ciphertext_recv, cipher_recv_iv = crypto.encrypt_with_dh_key(dh_key=server_dh_key, 
+                                                                         data=ciphertext_recv_json)
+            payload_json = {
+                "comm_source": recv_payload_json['comm_source'],
+                "comm_recv": recv_name,
+                "ciphertext_source": recv_payload_json['ciphertext'],
+                "ciphertext_recv": ciphertext_recv,
+                "cipher_source_iv": recv_payload_json['iv'],
+                "cipher_recv_iv": cipher_recv_iv
+            }
+            request_forward_json = {
+                "op_code": constant.OP_AUTH,
+                "event": "request_forward",
+                "payload": payload_json
             }
 
-        elif self.auth_status == "AWAITING_AUTH_KEY_EST" and message.get("event") == "comm_key_init" :
+            KDC_msg = ""
+            # open a socket to exchange request forwarding with KDC
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.connect((constant.SERVER_ADDRESS, constant.SERVER_PORT))
+                s.settimeout(20.0) # time out in 10 second
+
+                s.sendall(util_funcs.pack_message(request_forward_json))
+                KDC_msg = s.recv(4096)
+            
+
+            """
+            Receive and verify KDC response
+            """
+            KDC_response_json =json.loads(KDC_msg.decode())
+            if (KDC_response_json.get("op_code") != constant.OP_AUTH or
+                KDC_response_json.get("event") != "auth_KDC_resonse"):
+                # invalid response
+                raise ValueError(f"Invalid format response from KDC in auth process {KDC_response_json}")
+            
+            # verify response
+            response_payload = KDC_response_json['payload']
+            if response_payload.get("nonce") != nonce:
+                # verify failed
+                logger.debug(f"Nonce in response from KDC is wrong")
+                raise ValueError("Invalid response from KDC in auth process")
+            
+            ciphertext_recv_json = crypto.decrypt_with_dh_key(dh_key=server_dh_key, 
+                                                   cipher_text=response_payload['ciphertext_recv'], 
+                                                   iv=response_payload['cipher_recv_iv'])
+            if ciphertext_recv_json.get('comm_recv') != recv_name:
+                # verify failed
+                logger.debug(f"Receiver name in response from KDC is wrong")
+
+                raise ValueError("Invalid response from KDC in auth process")
+            
+            self.channel_key = ciphertext_recv_json['channel_key']
+
+
+            """
+            Distribute key
+            """
+            dist_payload_json = {
+                "ciphertext_source": response_payload['ciphertext_source'],
+                "cipher_source_iv": response_payload['cipher_source_iv']
+            }
+            dist_json = {
+                "op_code": constant.OP_AUTH,
+                "event": "distribute_key",
+                "payload": dist_payload_json
+            }
+            self.transport.write(util_funcs.pack_message(dist_json))
+            self.auth_status = "AWAITING_AUTH_KEY_EST"
+
+        elif self.auth_status == "AWAITING_AUTH_KEY_EST" and message.get("event") == "comm_dh_key_init" :
             pass
 
+        elif self.auth_status == "":
+            pass
         else:
             logger.debug(f"invalid message {message} from {addr}")
             raise ValueError(f"Invalid message from {addr}")
@@ -277,6 +385,9 @@ class ClientCommunicationProtocol(asyncio.Protocol):
             print(f"Error on connection: {exc}")
         else:
             print("Connection closed by client.")
+        
+        if self.timeout_handle:
+            self.timeout_handle.cancel()
 
         # TODO: also make sure to remove user from the authenticated user list
         # this is commented out for testing purposes.
@@ -305,6 +416,7 @@ async def list_request(client):
 
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.connect((constant.SERVER_ADDRESS, constant.SERVER_PORT))
+            s.settimeout(10.0) # time out in 10 second
             logger.debug(f"Connect to server for {temp_login_uname} list request")
 
             """
@@ -346,8 +458,13 @@ async def list_request(client):
             logger.debug(f"Complete list request")
             return user_json_list
 
+    except socket.timeout:
+        print("No data received within the time limit, closing socket.")
+        s.close()
+    
     except (socket.error, ConnectionError, ConnectionResetError, Exception) as e:
             logger.debug(f"Exception request list: {e}")
+            s.close()
 
 
 """
@@ -357,8 +474,14 @@ async def send_comm_message(client, destination, message_text):
     try:
             
             destination_dh_key = client.key_manager.get_dh_key_by_username(destination)
-            #dest_addr, dest_port = client.key_manager.get_addr_by_username(destination)
-            if destination_dh_key is None:
+            dest_addr, dest_port = client.key_manager.get_addr_by_username(destination)
+            temp_username = ""
+            async with lock:
+                temp_username = client.login_uname
+
+            if (destination_dh_key is None or 
+                dest_addr is None or
+                dest_port is None):
                 # have not connected yet
 
                 # check users_list
@@ -375,22 +498,64 @@ async def send_comm_message(client, destination, message_text):
 
                     # check updated users_list
                     if destination_info is None:
-                        # destination has not logined
+                        # stil not found, destination has not logined
                         print(f"{destination} has not logined, cannot send message to it")
                         raise ValueError(f"Failed to send message to {destination} who has not logined")
+                
 
-            temp_username = ""
-            async with lock:
-                temp_username = client.login_uname
+                """
+                Init communication connect
+                """
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.connect((dest_addr, dest_port))
+                    s.settimeout(20.0) # time out in 10 seconds
+                    logger.debug(f"Connect to server for init connection with {destination}")
+
+                    server_dh_key = client.key_manager.get_dh_key_by_username("KDC")
+                    if server_dh_key is None:
+                        logger.debug(f"Login time out in sending process")
+                        raise ValueError("Login time out")
+                    
+                    """
+                    Send comm auth init request
+                    """
+                    nonce_source = crypto.generate_nonce()
+                    nonce = crypto.generate_nonce()
+                    cipher_json = {
+                        "nonce_source": nonce_source,
+                        "nonce": nonce,
+                        "comm_source": temp_username,
+                        "comm_recv": destination
+                    }
+                    ciphertext, cipher_iv = crypto.encrypt_with_dh_key(dh_key=server_dh_key, 
+                                                                      data=cipher_json)
+                    payload_json = {
+                        "nonce": nonce,
+                        "comm_source": temp_username,
+                        "comm_recv": destination,
+                        "ciphertext": ciphertext,
+                        "iv": cipher_iv
+                    }
+                    comm_init_json = {
+                        "op_code": constant.OP_AUTH,
+                        "event": "comm_init",
+                        "payload": payload_json
+                    }
+                    s.sendall(util_funcs.pack_message(comm_init_json))
+                    
+
+                    """
+                    Process comm auth responsse
+                    """
+
 
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.connect((destination_info['client_service_addr'], 
-                           destination_info['client_service_port']))
-                logger.debug(f"Connect to server for {destination} login")
+                s.connect((dest_addr, dest_port))
+                logger.debug(f"Connect to server for sending message to {destination}")
 
                 
                 msg_json = {"msg": message_text}
-                msg_cipher, send_msg_iv = crypto.encrypt_with_dh_key(dh_key=temp_dh_key, 
+                msg_cipher, send_msg_iv = crypto.encrypt_with_dh_key(dh_key=destination_dh_key, 
                                                                       data=msg_json)
                 payload_json = {
                     "username": temp_username,
@@ -405,9 +570,14 @@ async def send_comm_message(client, destination, message_text):
                 s.sendall(util_funcs.pack_message(message_json))
                 logger.debug(f"sent {send_msg_iv} to {destination}")    
     
+    except socket.timeout:
+        print("No data received within the time limit, closing socket.")
+        s.close()
+
     except (socket.error, ConnectionError, ConnectionResetError, Exception) as e:
         print(f"Failed to send message to {destination}")
         logger.debug(f"Exception sending message: {e}")
+        s.close()
 
 """
 Check login status and connected status

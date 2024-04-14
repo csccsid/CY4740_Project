@@ -50,6 +50,15 @@ class AuthenticationKeyManager:
                 return self.authenticated_users[username]['dh_key']
             else:
                 return None  # Or raise an exception if preferred
+            
+    def get_addr_by_username(self, username):
+        """Retrieve the usaer info for a specific username."""
+        with self.lock:
+            if username in self.authenticated_users:
+                return (self.authenticated_users[username]['client_service_addr'], 
+                        self.authenticated_users[username]['client_service_addr'])
+            else:
+                return None, None  # Or raise an exception if preferred
 
     def expire_keys_task(self):
         """Background task to remove expired user entries."""
