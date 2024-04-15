@@ -186,6 +186,8 @@ class TCPAuthServerProtocol(asyncio.Protocol):
 
                     self.transport.write(json.dumps(auth_request_response).encode('ascii'))
 
+                    print(f"Auth request response sent to {addr}")
+
         else:
             self.reset_connection(f"Invalid auth event for KDC: {message['event']}")
 
