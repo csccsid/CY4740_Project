@@ -227,7 +227,7 @@ def get_sha256_dh_key(dh_key):
     return hash_object.digest()
 
 
-def decrypt_with_dh_key(dh_key, cipher_text, iv):
+def decrypt_with_dh_key(dh_key, cipher_text, nonce, tag):
     """
     Decrypts AES-encrypted data using a Diffie-Hellman key.
 
@@ -240,16 +240,8 @@ def decrypt_with_dh_key(dh_key, cipher_text, iv):
     - dict: The decrypted data parsed as JSON.
     """
     dh_key_sha = get_sha256_dh_key(dh_key)
-    cipher_text = base64.b64decode(cipher_text)
-    chal_iv = base64.b64decode(iv)
-    cipher = Cipher(algorithms.AES(dh_key_sha), modes.CFB(chal_iv), backend=default_backend())
-
-    # Decrypt the data
-    decryptor = cipher.decryptor()
-    decrypted_data = decryptor.update(cipher_text) + decryptor.finalize()
-
     # Convert the decrypted data back to a string (assuming it was originally a JSON string)
-    decrypted_string = decrypted_data.decode('ascii')
+    decrypted_string = decrypt_with_key(dh_key_sha, cipher_text, nonce, tag)
     return json.loads(decrypted_string)
 
 
@@ -261,8 +253,8 @@ def encrypt_with_dh_key(dh_key, data):
     dh_key (bytes): The Diffie-Hellman key used for encryption.
     data (dict): The data to encrypt, which must be serializable to JSON.
 
-    Returns:
-    tuple: A tuple containing two strings; the base64-encoded ciphertext and the base64-encoded initialization vector (IV).
+    Returns: tuple: A tuple containing two strings; the base64-encoded ciphertext and the base64-encoded
+    initialization vector (IV).
 
     The encryption uses AES algorithm in CFB mode with a 16-byte IV.
     """
@@ -272,25 +264,41 @@ def encrypt_with_dh_key(dh_key, data):
 
 
 def encrypt_with_key(key, data):
-    iv = os.urandom(16)
-    cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend())
+    # AES-GCM needs a nonce rather than an IV, typical size is 12 bytes for GCM
+    nonce = os.urandom(12)
+    cipher = Cipher(algorithms.AES(key), modes.GCM(nonce), backend=default_backend())
 
+    # Create an encryptor object
     encryptor = cipher.encryptor()
-    ciphertext = encryptor.update(json.dumps(data).encode()) + encryptor.finalize()
 
+    # Convert data to bytes and encrypt
+    data_bytes = json.dumps(data).encode()
+    ciphertext = encryptor.update(data_bytes) + encryptor.finalize()
+
+    # GCM mode needs to handle the authentication tag
+    tag = encryptor.tag
+
+    # Encode the outputs
     ciphertext_encoded = base64.b64encode(ciphertext).decode('ascii')
-    iv_encoded = base64.b64encode(iv).decode('ascii')
-    return ciphertext_encoded, iv_encoded
+    nonce_encoded = base64.b64encode(nonce).decode('ascii')
+    tag_encoded = base64.b64encode(tag).decode('ascii')
+
+    return ciphertext_encoded, nonce_encoded, tag_encoded
 
 
-def decrypt_with_key(key, cipher_encoded, iv_encoded):
-    iv = base64.b64decode(iv_encoded)
+def decrypt_with_key(key, cipher_encoded, nonce_encoded, tag_encoded):
+    # Decode the values
+    nonce = base64.b64decode(nonce_encoded)
     ciphertext = base64.b64decode(cipher_encoded)
+    tag = base64.b64decode(tag_encoded)
 
-    cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend())
+    # Setup cipher configuration
+    cipher = Cipher(algorithms.AES(key), modes.GCM(nonce, tag), backend=default_backend())
     decryptor = cipher.decryptor()
+
+    # Decrypt and return the plaintext data
     data_bytes = decryptor.update(ciphertext) + decryptor.finalize()
-    return data_bytes.decode()
+    return json.loads(data_bytes.decode('ascii'))
 
 
 def encrypt_with_key_prime(key_content, data):
@@ -305,7 +313,7 @@ def encrypt_with_key_prime(key_content, data):
     return encrypt_with_key(key_prime, data)
 
 
-def decrypt_with_key_prime(key_content, cipher_encoded, iv_encoded):
+def decrypt_with_key_prime(key_content, cipher_encoded, nonce_encoded, tag_encoded):
     # Convert the dictionary to a JSON string to ensure consistent ordering
     content_string = json.dumps(key_content, sort_keys=True)
 
@@ -314,4 +322,4 @@ def decrypt_with_key_prime(key_content, cipher_encoded, iv_encoded):
     hash_object = hashlib.sha256(content_bytes)
     key_prime = hash_object.digest()
 
-    return decrypt_with_key(key_prime, cipher_encoded, iv_encoded)
+    return decrypt_with_key(key_prime, cipher_encoded, nonce_encoded, tag_encoded)
