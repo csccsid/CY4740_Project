@@ -1,5 +1,5 @@
 .idea/*
-*.pem
+*key.pem
 *.log
 
 src/util/__pycache__/

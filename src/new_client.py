@@ -10,6 +10,7 @@ import base64
 import datetime
 import json
 import logging
+import constant
 
 from aioconsole import ainput
 from argon2 import PasswordHasher
@@ -58,8 +59,6 @@ def parse_arguments():
     parser.add_argument('-username', type=str, help="Username for login KDC", required=True)
     parser.add_argument('-password', type=str, help='Password for login KDC', required=True)
     parser.add_argument('-server_pub_key_path', type=str, help='Path to server public key file', required=True)
-    parser.add_argument('-server_ip', type=str, help='Server ip', required=True)
-    parser.add_argument('-server_port', type=int, help='Server port', required=True)
 
     return parser.parse_args()
 
@@ -741,12 +740,14 @@ async def main(client_service_port, username, password, host):
 if __name__ == "__main__":
     args = parse_arguments()
 
+    server_ip = constant.SERVER_ADDRESS
+    server_port = constant.SERVER_PORT
     server_public_key = load_key(args.server_pub_key_path, public=True)
     client_instance = Client(args.username,
                              args.password,
                              args.client_service_port,
-                             args.server_ip,
-                             args.server_port,
+                             server_ip,
+                             server_port,
                              args.host)
     try:
         if server_public_key is not None and client_instance is not None:

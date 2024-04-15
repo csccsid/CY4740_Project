@@ -1,0 +1,6 @@
+aioconsole==0.7.0
+argon2-cffi==23.1.0
+argon2-cffi-bindings==21.2.0
+cffi==1.16.0
+cryptography==42.0.5
+pymongo==4.6.3
