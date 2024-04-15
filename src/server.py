@@ -124,11 +124,12 @@ class TCPAuthServerProtocol(asyncio.Protocol):
             logout_payload = json.loads(message["payload"])
 
             logout_request_cipher = logout_payload['ciphertext']
-            logout_request_iv = logout_payload['iv']
+            logout_request_gcm_nonce = logout_payload['gcm_nonce']
+            logout_request_gcm_tag = logout_payload['gcm_tag']
             logout_request_user = logout_payload['username']
 
             if (logout_request_cipher is None
-                    or logout_request_iv is None
+                    or logout_request_gcm_nonce is None
                     or logout_request_user is None):
                 self.reset_connection(f"Invalid logout request: {message['payload']}")
                 return
@@ -136,7 +137,8 @@ class TCPAuthServerProtocol(asyncio.Protocol):
             logout_request_user_dh_key = self.key_manager.get_dh_key_by_username(logout_request_user)
             logout_request = decrypt_with_dh_key(logout_request_user_dh_key,
                                                  logout_request_cipher,
-                                                 logout_request_iv)
+                                                 logout_request_gcm_nonce,
+                                                 logout_request_gcm_tag)
 
             if logout_request is None:
                 self.reset_connection(f"Invalid logout request: {message['payload']}")
@@ -170,29 +172,35 @@ class TCPAuthServerProtocol(asyncio.Protocol):
             client_recv_dh_key = self.key_manager.get_dh_key_by_username(client_recv)
 
             client_source_cipher = client_auth_payload["ciphertext_source"]
-            client_source_iv = client_auth_payload["cipher_source_iv"]
+            client_source_gcm_nonce = client_auth_payload["cipher_source_gcm_nonce"]
+            client_source_gcm_tag = client_auth_payload["cipher_source_gcm_tag"]
 
             client_recv_cipher = client_auth_payload["ciphertext_recv"]
-            client_recv_iv = client_auth_payload["cipher_recv_iv"]
+            client_recv_gcm_nonce = client_auth_payload["cipher_recv_gcm_nonce"]
+            client_recv_gcm_tag = client_auth_payload["cipher_recv_gcm_tag"]
 
             if any(v is None for v in [
                 client_source_cipher,
-                client_source_iv,
+                client_source_gcm_nonce,
                 client_recv_cipher,
-                client_recv_iv,
+                client_source_gcm_tag,
+                client_recv_gcm_nonce,
                 client_source_dh_key,
-                client_recv_dh_key
+                client_recv_dh_key,
+                client_recv_gcm_tag
             ]):
                 self.reset_connection(f"Bad request for on_auth between {client_source} and {client_recv}")
             else:
 
                 client_source_payload = decrypt_with_dh_key(client_source_dh_key,
                                                             client_source_cipher,
-                                                            client_source_iv)
+                                                            client_source_gcm_nonce,
+                                                            client_source_gcm_tag)
 
                 client_recv_payload = decrypt_with_dh_key(client_recv_dh_key,
                                                           client_recv_cipher,
-                                                          client_recv_iv)
+                                                          client_recv_gcm_nonce,
+                                                          client_recv_gcm_tag)
 
                 # entering a series of checking,
                 # check if the session identifier match or has been replayed
@@ -220,12 +228,16 @@ class TCPAuthServerProtocol(asyncio.Protocol):
                         'channel_key': client_shared_key
                     }
 
-                    client_recv_payload_cipher, client_recv_payload_iv = encrypt_with_dh_key(
+                    (client_recv_payload_cipher,
+                     client_recv_payload_gcm_nonce,
+                     client_recv_payload_gcm_tag) = encrypt_with_dh_key(
                         client_recv_dh_key,
                         client_recv_payload
                     )
 
-                    client_source_payload_cipher, client_source_payload_iv = encrypt_with_dh_key(
+                    (client_source_payload_cipher,
+                     client_source_payload_gcm_nonce,
+                     client_source_payload_gcm_tag) = encrypt_with_dh_key(
                         client_source_dh_key,
                         client_source_payload
                     )
@@ -233,9 +245,11 @@ class TCPAuthServerProtocol(asyncio.Protocol):
                     payload_json = {
                         'nonce': M_nonce,
                         'ciphertext_source': client_source_payload_cipher,
-                        'cipher_source_iv': client_source_payload_iv,
+                        'cipher_source_gcm_nonce': client_source_payload_gcm_nonce,
+                        'cipher_source_gcm_tag': client_source_payload_gcm_tag,
                         'ciphertext_recv': client_recv_payload_cipher,
-                        'cipher_recv_iv': client_recv_payload_iv
+                        'cipher_recv_gcm_nonce': client_recv_payload_gcm_nonce,
+                        'cipher_recv_gcm_tag': client_recv_payload_gcm_tag
                     }
 
                     auth_request_response = {
@@ -304,7 +318,8 @@ class TCPAuthServerProtocol(asyncio.Protocol):
 
         list_request_payload_content = decrypt_with_dh_key(dh_key,
                                                            list_request_payload_json['ciphertext'],
-                                                           list_request_payload_json['iv'])
+                                                           list_request_payload_json['gcm_nonce'],
+                                                           list_request_payload_json['gcm_tag'])
         print(username)
         if username != list_request_payload_content["username"]:
             print(f"Request username mismatch, addr: {addr}")
@@ -312,11 +327,15 @@ class TCPAuthServerProtocol(asyncio.Protocol):
             self.__init__()
         else:
             user_json_list = self.key_manager.get_all_users()
-            user_list_cipher, user_list_iv = encrypt_with_dh_key(dh_key=dh_key, data=user_json_list)
+            (user_list_cipher,
+             user_list_gcm_nonce,
+             user_list_gcm_tag) = encrypt_with_dh_key(dh_key=dh_key, data=user_json_list)
 
             user_list_payload = {
                 "ciphertext": user_list_cipher,
-                "iv": user_list_iv}
+                "gcm_nonce": user_list_gcm_nonce,
+                "gcm_tag": user_list_gcm_tag
+            }
 
             user_list_response = {
                 "op_code": OP_CMD,
@@ -390,13 +409,17 @@ class TCPAuthServerProtocol(asyncio.Protocol):
                                      "server_nonce": self.server_nonce,
                                      "server_modulo": server_modulo}
 
-                ciphertext_encoded, iv_encoded = encrypt_with_key_prime(key_content=key_prime_content,
-                                                                        data=challenge_content)
+                (ciphertext_encoded,
+                 gcm_nonce_encoded,
+                 gcm_tag_encoded) = encrypt_with_key_prime(key_content=key_prime_content,
+                                                           data=challenge_content)
 
                 payload = {"argon2_params": argon2_params,
                            "argon2_params_signature": argon2_params_signature_encoded,
                            "challenge": ciphertext_encoded,
-                           "iv": iv_encoded}
+                           "gcm_nonce": gcm_nonce_encoded,
+                           "gcm_tag_encoded": gcm_tag_encoded
+                           }
 
                 auth_req_response = {
                     "op_code": OP_LOGIN,
@@ -420,7 +443,8 @@ class TCPAuthServerProtocol(asyncio.Protocol):
             chal_resp_payload = json.loads(message['payload'])
             decrypted_json = decrypt_with_dh_key(dh_key=self.dh_key,
                                                  cipher_text=chal_resp_payload["ciphertext"],
-                                                 iv=chal_resp_payload["iv"])
+                                                 nonce=chal_resp_payload["gcm_nonce"],
+                                                 tag=chal_resp_payload["gcm_tag"])
 
             # client should be able to use the password derived key to decrypt payload
             # and obtain server_nonce
