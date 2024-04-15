@@ -28,7 +28,7 @@ from util.crypto import (
 )
 
 from constant import (
-    G, P, OP_LOGIN, OP_CMD, OP_LOGOUT
+    G, P, OP_LOGIN, OP_CMD, OP_LOGOUT, OP_AUTH
 )
 
 server_public_key = None
@@ -273,6 +273,66 @@ class Client:
             writer.close()
             await writer.wait_closed()
             logger.debug(f'TCP connection closed with {self.server_ip, self.server_port}')
+
+    async def send_msg(self, dest_username, dest_content):
+        dest_user_info = self.user_list.get(dest_username)
+        dest_service_ip = dest_user_info.get("client_service_addr")
+        dest_service_port = dest_user_info.get("client_service_port")
+
+        c2c_dh_key = self.key_manager.get_dh_key_by_username(dest_username)
+
+        reader, writer = await asyncio.open_connection(dest_service_ip, dest_service_port)
+
+        try:
+            if c2c_dh_key is None:
+                # welp, not dh key found, initiating ~~~keanu reeves~~~ otway rees
+                session_identifier = generate_nonce()
+                sender_nonce = generate_nonce()
+                self.otwayrees_list[dest_username] = {
+                    "session_identifier": session_identifier,
+                    "sender_nonce": sender_nonce,
+                    "auth_status": "AWAIT_RECEIVER_RESP"
+                }
+
+                sender_info_dump = json.dumps(self.user_info)
+                receiver_info_dump = json.dumps(dest_user_info)
+
+                sender_payload = {
+                    "sender_nonce": sender_nonce,
+                    "session_identifier": session_identifier,
+                    "sender_info": sender_info_dump,
+                    "receiver_info": receiver_info_dump
+                }
+
+                (sender_payload_cipher,
+                 sender_payload_gcm_nonce,
+                 sender_payload_gcm_tag) = encrypt_with_dh_key(self.dh_key, sender_payload)
+
+                otway_payload = {
+                    "session_identifier": session_identifier,
+                    "sender_info": sender_info_dump,
+                    "receiver_info": receiver_info_dump,
+                    "sender_ciphertext": sender_payload_cipher,
+                    "sender_gcm_nonce": sender_payload_gcm_nonce,
+                    "sender_gcm_tag": sender_payload_gcm_tag
+                }
+
+                otway_init_request = {
+                    "op_code": OP_AUTH,
+                    "event": "auth_init_request",
+                    "payload": json.dumps(otway_payload)
+                }
+
+                otway_init_request_ready = json.dumps(otway_init_request).encode()
+
+                writer.write(otway_init_request_ready)
+                await writer.drain()
+
+                # the following requests should be handled with TCPClientServerProtocol
+        finally:
+            writer.close()
+            await writer.wait_closed()
+            logger.debug(f'TCP connection closed with {dest_service_ip, dest_service_port}')
 
 
 async def handle_messages():
