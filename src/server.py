@@ -161,7 +161,7 @@ class TCPAuthServerProtocol(asyncio.Protocol):
         """
 
         if message["event"] == "request_forward":
-            client_auth_payload = json.loads(message["payload"])
+            client_auth_payload = message["payload"]
 
             client_source = client_auth_payload["comm_source"]
             client_recv = client_auth_payload["comm_recv"]
@@ -208,15 +208,16 @@ class TCPAuthServerProtocol(asyncio.Protocol):
                     nonce_db.insert_one({'nonce': client_recv_payload['nonce']})
 
                     client_shared_key = generate_dh_private_key()
+                    M_nonce = client_recv_payload['nonce']
 
                     client_recv_payload = {
                         'nonce': client_recv_payload['recv_nonce'],
-                        'auth_key': client_shared_key
+                        'channel_key': client_shared_key
                     }
 
                     client_source_payload = {
                         'nonce': client_source_payload['nonce_source'],
-                        'auth_key': client_shared_key
+                        'channel_key': client_shared_key
                     }
 
                     client_recv_payload_cipher, client_recv_payload_iv = encrypt_with_dh_key(
@@ -230,7 +231,7 @@ class TCPAuthServerProtocol(asyncio.Protocol):
                     )
 
                     payload_json = {
-                        'nonce': client_recv_payload['nonce'],
+                        'nonce': M_nonce,
                         'ciphertext_source': client_source_payload_cipher,
                         'cipher_source_iv': client_source_payload_iv,
                         'ciphertext_recv': client_recv_payload_cipher,

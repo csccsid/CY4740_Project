@@ -46,7 +46,7 @@ class Client:
         pass
 
     def login(self, uname, pswd):
-        try:
+        #try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.connect((constant.SERVER_ADDRESS, constant.SERVER_PORT))
                 s.settimeout(10.0) # set socket time out in 10 second
@@ -177,16 +177,15 @@ class Client:
                                               constant.SERVER_ADDRESS, constant.SERVER_PORT)
                     print(f"Login success {uname}!")
 
-        except socket.timeout:
-            print("No data received within the time limit, closing socket.")
-            s.close()
+        #except socket.timeout:
+            #print("No data received within the time limit, closing socket.")
+            #s.close()
+        #except (socket.error, ConnectionError, ConnectionResetError) as e:
+            #logger.debug(f"Exception login: {e}")
+            #s.close()
+            #return False
 
-        except (socket.error, ConnectionError, ConnectionResetError) as e:
-            logger.debug(f"Exception login: {e}")
-            s.close()
-            return False
-
-        return True
+            return True
 
 
 
@@ -236,7 +235,7 @@ class ClientCommunicationProtocol(asyncio.Protocol):
 
 
     async def process_message(self, message, addr):
-        try:
+        #try:
             match message.get('op_code'):
                 case constant.OP_AUTH:
                     await self.on_auth(message, addr)
@@ -244,14 +243,14 @@ class ClientCommunicationProtocol(asyncio.Protocol):
                 case constant.OP_MSG:
                     await self.recv_comm_message(message)
 
-        except Exception as e:
-            logger.error(f"Error processing message: {e}")
-            self.transport.write(util_funcs.pack_message({
-                "op_code": constant.OP_ERROR,
-                "event": "error",
-                "payload": ""
-            }))
-            self.transport.close()
+        #except Exception as e:
+            #logger.error(f"Error processing message: {e}")
+            #self.transport.write(util_funcs.pack_message({
+                #"op_code": constant.OP_ERROR,
+                #"event": "error",
+                #"payload": ""
+            #}))
+            #self.transport.close()
         
 
     """
@@ -269,7 +268,9 @@ class ClientCommunicationProtocol(asyncio.Protocol):
 
         if self.auth_status == "AWAITING_AUTH_REQ" and message.get("event") == "comm_init":
             # check comm_recv
+            print(f"recv_name is {recv_name}")
             if recv_payload_json.get("comm_recv") != recv_name:
+                print("")
                 raise ValueError(f"Invalid communication receiver {recv_payload_json}")
             
             """
@@ -303,26 +304,25 @@ class ClientCommunicationProtocol(asyncio.Protocol):
 
             KDC_msg = ""
             # open a socket to exchange request forwarding with KDC
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.connect((constant.SERVER_ADDRESS, constant.SERVER_PORT))
-                s.settimeout(20.0) # time out in 10 second
-
-                s.sendall(util_funcs.pack_message(request_forward_json))
-                KDC_msg = s.recv(4096)
+            reader, writer = await asyncio.open_connection(constant.SERVER_ADDRESS, constant.SERVER_PORT)
+            writer.write(util_funcs.pack_message(request_forward_json))
+            KDC_msg = await reader.read(4096)
+            writer.close()
+            await writer.wait_closed()
             
 
             """
             Receive and verify KDC response
             """
-            print("Receive and verify KDC response")
             KDC_response_json =json.loads(KDC_msg.decode())
             if (KDC_response_json.get("op_code") != constant.OP_AUTH or
-                KDC_response_json.get("event") != "auth_KDC_resonse"):
+                KDC_response_json.get("event") != "auth_KDC_response"):
                 # invalid response
                 raise ValueError(f"Invalid format response from KDC in auth process {KDC_response_json}")
             
             # verify response
-            response_payload = KDC_response_json['payload']
+            response_payload = json.loads(KDC_response_json['payload'])
+            print(f"got KDC payload {response_payload}")
             if response_payload.get("nonce") != nonce:
                 # verify failed
                 logger.debug(f"Nonce in response from KDC is wrong")
@@ -331,7 +331,7 @@ class ClientCommunicationProtocol(asyncio.Protocol):
             ciphertext_recv_json = crypto.decrypt_with_dh_key(dh_key=server_dh_key, 
                                                    cipher_text=response_payload['ciphertext_recv'], 
                                                    iv=response_payload['cipher_recv_iv'])
-            if ciphertext_recv_json.get('comm_recv') != recv_name:
+            if ciphertext_recv_json.get('nonce') != recv_nonce:
                 # verify failed
                 logger.debug(f"Receiver name in response from KDC is wrong")
 
@@ -374,11 +374,11 @@ class ClientCommunicationProtocol(asyncio.Protocol):
                 raise ValueError("Comm_source in comm dh key init request is wrong")
             
             self.estab_recv_nonce = crypto.generate_nonce()
-            recv_exponent = crypto.encrypt_with_key_prime()
-            self.estab_dh_key = pow(estab_key_init_json['modulo'], recv_exponent, constant.P)
+            recv_exponent = crypto.generate_dh_private_key()
+            self.estab_dh_key = pow(estab_key_init_json['source_modulo'], recv_exponent, constant.P)
 
             estab_chal_cipher_json = {
-                "comm_recv": self.source_name,
+                "comm_recv": recv_name,
                 "estab_source_nonce": estab_key_init_json['estab_source_nonce'],
                 "estab_recv_nonce": self.estab_recv_nonce,
                 "recv_modulo": pow(constant.G, recv_exponent, constant.P)
@@ -386,7 +386,7 @@ class ClientCommunicationProtocol(asyncio.Protocol):
             estab_chal_ciphertext, estab_chal_iv = crypto.encrypt_with_dh_key(dh_key=self.channel_key,
                                                                               data=estab_chal_cipher_json)
             estab_chal_payload_json = {
-                "comm_recv": self.source_name,
+                "comm_recv": recv_name,
                 "estab_chal_ciphertext": estab_chal_ciphertext,
                 "estab_chal_iv": estab_chal_iv
             }
@@ -409,13 +409,11 @@ class ClientCommunicationProtocol(asyncio.Protocol):
             if estab_chal_resp_json.get('estab_recv_nonce') != self.estab_recv_nonce:
                 # verify failed
                 raise ValueError("Verify failed in estab key challenge response")
-            
+                        
             # add source user to client connect list
-            # find source port in client users list
-            source_user_info = client.users_list[client.source_name]
-            client.key_manager.add_user(client.source_name, self.estab_dh_key, 
-                                        addr[0], source_user_info['client_service_port'])
-
+            client.key_manager.add_user(self.source_name, self.estab_dh_key, 
+                                        addr[0], estab_chal_resp_json['source_service_port'])
+            
         else:
             logger.debug(f"invalid message {message} from {addr}")
             raise ValueError(f"Invalid message from {addr}")
@@ -424,14 +422,16 @@ class ClientCommunicationProtocol(asyncio.Protocol):
     """
     Func to receive communication message
     """
-    def recv_comm_message(self, message):
+    async def recv_comm_message(self, message):
         payload_json = message.get("payload")
-        dh_key = self.key_manager.get_dh_key_by_username(payload_json.get("username"))
+        print(client.key_manager.get_all_users())
+        print(payload_json.get("username"))
+        dh_key = client.key_manager.get_dh_key_by_username(payload_json.get("username"))
         if dh_key is None:
             raise ValueError("Receive message from user never connected or key expired")
         
-        if message.get("event") == "send_msg":
-            decrypted_json = crypto.decrypt_with_dh_key(dh_key=self.dh_key,
+        if dh_key is not None and message.get("event") == "send_msg":
+            decrypted_json = crypto.decrypt_with_dh_key(dh_key=dh_key,
                                                  cipher_text=payload_json["ciphertext"],
                                                  iv=payload_json["iv"])
             print(f"Receive message {decrypted_json['msg']} from {payload_json['username']}")
@@ -446,12 +446,6 @@ class ClientCommunicationProtocol(asyncio.Protocol):
         if self.timeout_handle:
             self.timeout_handle.cancel()
 
-        # TODO: also make sure to remove user from the authenticated user list
-        # this is commented out for testing purposes.
-        # if self.username in self.authenticated_users:
-        #     asyncio.create_task(self.modify_users_remove(self.username))
-        self.__init__()
-        print("Client info reset completed")
         super().connection_lost(exc)
 
 
@@ -459,7 +453,7 @@ class ClientCommunicationProtocol(asyncio.Protocol):
 Send message in communication
 """
 async def send_comm_message(client, destination, message_text):
-    try:
+    #try:
             
             destination_dh_key = client.key_manager.get_dh_key_by_username(destination)
             dest_addr, dest_port = client.key_manager.get_addr_by_username(destination)
@@ -500,178 +494,190 @@ async def send_comm_message(client, destination, message_text):
                 dest_addr = destination_info['client_service_addr']
                 dest_port = int(destination_info['client_service_port'])
                 print(f"port is {isinstance(dest_port, int)}, {dest_port}")
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.connect((dest_addr, dest_port))
-                    print("connect failed")
-                    s.settimeout(20.0) # time out in 10 seconds
-                    logger.debug(f"Connect to server for init connection with {destination}")
 
-                    server_dh_key = client.key_manager.get_dh_key_by_username("KDC")
-                    if server_dh_key is None:
-                        logger.debug(f"Login time out in sending process")
-                        raise ValueError("Login time out")
+                reader, writer = await asyncio.open_connection(dest_addr, dest_port)
+                logger.debug(f"Connect to server for init connection with {destination}")
+
+                server_dh_key = client.key_manager.get_dh_key_by_username("KDC")
+                if server_dh_key is None:
+                    logger.debug(f"Login time out in sending process")
+                    raise ValueError("Login time out")
                     
-                    """
-                    Send comm auth init request
-                    """
-                    nonce_source = crypto.generate_nonce()
-                    nonce = crypto.generate_nonce()
-                    cipher_json = {
-                        "nonce_source": nonce_source,
-                        "nonce": nonce,
-                        "comm_source": temp_username,
-                        "comm_recv": destination
-                    }
-                    ciphertext, cipher_iv = crypto.encrypt_with_dh_key(dh_key=server_dh_key, 
+                """
+                Send comm auth init request
+                """
+                nonce_source = crypto.generate_nonce()
+                nonce = crypto.generate_nonce()
+                cipher_json = {
+                    "nonce_source": nonce_source,
+                    "nonce": nonce,
+                    "comm_source": temp_username,
+                    "comm_recv": destination
+                }
+                print(f"destination is {destination}")
+                ciphertext, cipher_iv = crypto.encrypt_with_dh_key(dh_key=server_dh_key, 
                                                                       data=cipher_json)
-                    payload_json = {
-                        "nonce": nonce,
-                        "comm_source": temp_username,
-                        "comm_recv": destination,
-                        "ciphertext": ciphertext,
-                        "iv": cipher_iv
-                    }
-                    comm_init_json = {
-                        "op_code": constant.OP_AUTH,
-                        "event": "comm_init",
-                        "payload": json.dumps(payload_json)
-                    }
-                    print("A sends init to B")
-                    s.sendall(util_funcs.pack_message(comm_init_json))
+                payload_json = {
+                    "nonce": nonce,
+                    "comm_source": temp_username,
+                    "comm_recv": destination,
+                    "ciphertext": ciphertext,
+                    "iv": cipher_iv
+                }
+                comm_init_json = {
+                    "op_code": constant.OP_AUTH,
+                    "event": "comm_init",
+                    "payload": payload_json
+                }
+                print("A sends init to B")
+                writer.write(util_funcs.pack_message(comm_init_json))
+                await writer.drain()
                     
 
-                    """
-                    Process communication auth responsse
-                    """
-                    print("receive B's response")
-                    auth_response_msg = s.recv(4096)
-                    auth_response_json = json.loads(auth_response_msg)
-                    if (auth_response_json.get("op_code") != constant.OP_AUTH or
-                        auth_response_json.get("event") != "distribute_key"):
-                        # invalid response
-                        raise ValueError(f"Invalid auth response format")
+                """
+                Process communication auth responsse
+                """
+                auth_response_msg = await reader.read(4096)
+                auth_response_json = json.loads(auth_response_msg)
+                print(f"receive B's response {auth_response_json}")
+                if (auth_response_json.get("op_code") != constant.OP_AUTH or
+                    auth_response_json.get("event") != "distribute_key"):
+                    # invalid response
+                    raise ValueError(f"Invalid auth response format")
                     
-                    response_payload_json = auth_response_json.get("payload")
-                    ciphertext_source_json = crypto.decrypt_with_dh_key(dh_key=server_dh_key,
+                response_payload_json = auth_response_json.get("payload")
+                ciphertext_source_json = crypto.decrypt_with_dh_key(dh_key=server_dh_key,
                                                                         cipher_text=response_payload_json['ciphertext_source'],
                                                                         iv=response_payload_json['cipher_source_iv'])
-                    # verify KDC response
-                    if ciphertext_source_json.get("comm_source") != temp_username:
-                        # verify falied
-                        logger.debug(f"Source name in response from KDC is wrong")
-                        raise ValueError("Invalid auth response in distributing key process")
+                # verify KDC response
+                if ciphertext_source_json.get("nonce") != nonce_source:
+                    # verify falied
+                    logger.debug(f"Source name in response from KDC is wrong")
+                    raise ValueError("Invalid auth response in distributing key process")
                     
-                    channel_key = ciphertext_source_json['channel_key']
+                channel_key = ciphertext_source_json['channel_key']
 
 
-                    """
-                    Establish communication dh key, send init request
-                    """
-                    print("send init reqeust to Establish communication dh key")
-                    estab_source_nonce = crypto.generate_nonce()
-                    comm_exponent = crypto.generate_dh_private_key()
-                    estab_key_init_json = {
-                        "comm_source": temp_username,
-                        "estab_source_nonce": estab_source_nonce,
-                        "source_modulo": pow(constant.G, comm_exponent, constant.P)
-                    }
-                    estab_init_ciphertext, estab_init_iv = crypto.encrypt_with_dh_key(dh_key=channel_key,
+                """
+                Establish communication dh key, send init request
+                """
+                print("send init reqeust to Establish communication dh key")
+                estab_source_nonce = crypto.generate_nonce()
+                comm_exponent = crypto.generate_dh_private_key()
+                estab_key_init_json = {
+                    "comm_source": temp_username,
+                    "estab_source_nonce": estab_source_nonce,
+                    "source_modulo": pow(constant.G, comm_exponent, constant.P)
+                }
+                estab_init_ciphertext, estab_init_iv = crypto.encrypt_with_dh_key(dh_key=channel_key,
                                                                                       data=estab_key_init_json)
-                    estab_init_payload_json = {
-                        "comm_source": temp_username,
-                        "estab_init_ciphertext": estab_init_ciphertext,
-                        "estab_init_iv": estab_init_iv
-                    }
-                    estab_init_request_json = {
-                        "op_code": constant.OP_AUTH,
-                        "event": "comm_dh_key_init",
-                        "payload": estab_init_payload_json
-                    }
-                    s.sendall(util_funcs.pack_message(estab_init_request_json))
+                estab_init_payload_json = {
+                    "comm_source": temp_username,
+                    "estab_init_ciphertext": estab_init_ciphertext,
+                    "estab_init_iv": estab_init_iv
+                }
+                estab_init_request_json = {
+                    "op_code": constant.OP_AUTH,
+                    "event": "comm_dh_key_init",
+                    "payload": estab_init_payload_json
+                }
+                writer.write(util_funcs.pack_message(estab_init_request_json))
+                await writer.drain()
 
 
-                    """
-                    Receive init response verify
-                    """
-                    print("Receive init response verify")
-                    estab_chal_message = s.recv(4096)
-                    estab_chal_json = json.loads(estab_chal_message)
-                    if (estab_chal_json.get("op_code") != constant.OP_AUTH or
-                        estab_chal_json.get("event" != "estab_challange")):
-                        # invalid message
-                        raise ValueError("Invalid establish key challenge")
+                """
+                Receive init response verify
+                """
+                print("Receive init response verify")
+                estab_chal_message = await reader.read(4096)
+                estab_chal_json = json.loads(estab_chal_message)
+                print(f"estab_chal_json is {estab_chal_json}")
+                if (estab_chal_json.get("op_code") != constant.OP_AUTH or
+                    estab_chal_json.get("event" != "estab_challange")):
+                    # invalid message
+                    raise ValueError("Invalid establish key challenge")
                     
-                    estab_chal_payload_json = estab_chal_json['payload']
-                    establ_chal_json = crypto.decrypt_with_dh_key(dh_key=channel_key,
+                estab_chal_payload_json = estab_chal_json['payload']
+                establ_chal_json = crypto.decrypt_with_dh_key(dh_key=channel_key,
                                                                   cipher_text=estab_chal_payload_json['estab_chal_ciphertext'],
-                                                                  iv=estab_chal_payload_json['estab_chal_ciphertext'])
-                    if (estab_chal_payload_json.get("estab_source_nonce") != estab_source_nonce or
+                                                                  iv=estab_chal_payload_json['estab_chal_iv'])
+                if (establ_chal_json.get("estab_source_nonce") != estab_source_nonce or
                         estab_chal_payload_json.get("comm_recv") != destination or
                         establ_chal_json.get("comm_recv") != destination):
                         # invalid establish key challenge
                         raise ValueError("Invalid establish key challenge")
                     
                     
-                    """
-                    Establish key and send last challenge response
-                    """
-                    print("Establish key and send last challenge response")
-                    destination_dh_key = pow(establ_chal_json['recv_modulo'], comm_exponent, constant.P)
-                    # add destination to connect list
-                    client.key_manager.add_user(destination, destination_dh_key, dest_addr, dest_port)
-                    estab_chal_resp = {
-                        "estab_recv_nonce": establ_chal_json['estab_recv_nonce']
-                    }
-                    estab_chal_resp_ciphertext, estab_chal_resp_iv = crypto.encrypt_with_dh_key(dh_key=destination_dh_key,
+                """
+                Establish key and send last challenge response
+                """
+                print("Establish key and send last challenge response")
+                destination_dh_key = pow(establ_chal_json['recv_modulo'], comm_exponent, constant.P)
+                # add destination to connect list
+                client.key_manager.add_user(destination, destination_dh_key, dest_addr, dest_port)
+                source_service_port = None
+                async with lock:
+                    source_service_port = client.cp
+                estab_chal_resp = {
+                    "estab_recv_nonce": establ_chal_json['estab_recv_nonce'],
+                    "source_service_port": source_service_port
+                }
+                estab_chal_resp_ciphertext, estab_chal_resp_iv = crypto.encrypt_with_dh_key(dh_key=destination_dh_key,
                                                                                                 data=estab_chal_resp)
-                    estab_chal_resp_payload = {
-                        "estab_chal_resp_ciphertext": estab_chal_resp_ciphertext,
-                        "estab_chal_resp_iv": estab_chal_resp_iv
-                    }
-                    estab_chal_resp_json = {
-                        "op_code": constant.OP_AUTH,
-                        "event": "estab_chal_response",
-                        "payload": estab_chal_resp_payload
-                    }
-                    s.sendall(util_funcs.pack_message(estab_chal_resp_json))
+                estab_chal_resp_payload = {
+                    "estab_chal_resp_ciphertext": estab_chal_resp_ciphertext,
+                    "estab_chal_resp_iv": estab_chal_resp_iv
+                }
+                estab_chal_resp_json = {
+                    "op_code": constant.OP_AUTH,
+                    "event": "estab_chal_response",
+                    "payload": estab_chal_resp_payload
+                }
+                writer.write(util_funcs.pack_message(estab_chal_resp_json))
+                await writer.drain()
+
+                writer.close()
+                await writer.wait_closed()
 
 
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.connect((dest_addr, dest_port))
-                logger.debug(f"Connect to server for sending message to {destination}")
+            print("already connected")
+            reader_send, writer_send = await asyncio.open_connection(dest_addr, dest_port)
+            logger.debug(f"Connect to server for sending message to {destination}")
 
                 
-                msg_json = {"msg": message_text}
-                msg_cipher, send_msg_iv = crypto.encrypt_with_dh_key(dh_key=destination_dh_key, 
+            msg_json = {"msg": message_text}
+            msg_cipher, send_msg_iv = crypto.encrypt_with_dh_key(dh_key=destination_dh_key, 
                                                                       data=msg_json)
-                payload_json = {
-                    "username": temp_username,
-                    "ciphertext": msg_cipher,
-                    "iv": send_msg_iv
-                }
-                message_json = {
-                    "op_code": constant.OP_MSG,
-                    "event": "send_msg",
-                    "payload": payload_json
-                }
-                s.sendall(util_funcs.pack_message(message_json))
-                logger.debug(f"sent {send_msg_iv} to {destination}")    
-    
-    except socket.timeout:
-        print("No data received within the time limit, closing socket.")
-        s.close()
+            payload_json = {
+                "username": temp_username,
+                "ciphertext": msg_cipher,
+                "iv": send_msg_iv
+            }
+            message_json = {
+                "op_code": constant.OP_MSG,
+                "event": "send_msg",
+                "payload": payload_json
+            }
+            writer_send.write(util_funcs.pack_message(message_json))
+            await writer_send.drain()
+            logger.debug(f"sent {send_msg_iv} to {destination}") 
 
-    except (socket.error, ConnectionError, ConnectionResetError, Exception) as e:
-        print(f"Failed to send message to {destination}")
-        logger.debug(f"Exception sending message: {e}")
-        s.close()
+            writer_send.close()
+            await writer_send.wait_closed()   
+    
+    #except socket.timeout:
+        #print("No data received within the time limit, closing socket.")
+
+    #except (socket.error, ConnectionError, ConnectionResetError, Exception) as e:
+        #print(f"Failed to send message to {destination}")
+        #logger.debug(f"Exception sending message: {e}")
 
 
 """
 Send list reqest to KDC
 """
 async def list_request(client):
-    try:
+    #try:
         temp_dh_key = None
         temp_login_uname = ""
         async with lock:
@@ -727,13 +733,13 @@ async def list_request(client):
             logger.debug(f"Complete list request")
             return user_json_list
 
-    except socket.timeout:
-        print("No data received within the time limit, closing socket.")
-        s.close()
+    #except socket.timeout:
+        #print("No data received within the time limit, closing socket.")
+        #s.close()
     
-    except (socket.error, ConnectionError, ConnectionResetError, Exception) as e:
-            logger.debug(f"Exception request list: {e}")
-            s.close()
+    #except (socket.error, ConnectionError, ConnectionResetError, Exception) as e:
+            #logger.debug(f"Exception request list: {e}")
+            #s.close()
 
 
 """
@@ -766,27 +772,27 @@ Handle user input command
 async def handle_input(client):
     while True:
         input_cmd = (await aioconsole.ainput()).split()
-        try: 
-            match input_cmd[0]:
-                case  "list":
-                    # send list request to KDC
-                    user_json_list = await list_request(client)
-                    print(f"users list: {list(user_json_list.keys())}")
-                    # update client users list
-                    async with lock:
-                        client.users_list = user_json_list
+        #try: 
+        match input_cmd[0]:
+            case  "list":
+                # send list request to KDC
+                user_json_list = await list_request(client)
+                print(f"users list: {list(user_json_list.keys())}")
+                # update client users list
+                async with lock:
+                     client.users_list = user_json_list
                     
-                case "send":
-                    # start communication with another client
-                    # check user name
-                    if input_cmd[1] == "KDC":
-                        print("Cannot send message to KDC")
-                    else:
-                        print("pending to send auth message")
-                        await send_comm_message(client, input_cmd[1], input_cmd[2])
+            case "send":
+                # start communication with another client
+                # check user name
+                if input_cmd[1] == "KDC":
+                    print("Cannot send message to KDC")
+                else:
+                    print("pending to send auth message")
+                    await send_comm_message(client, input_cmd[1], input_cmd[2])
 
-        except (socket.error, ConnectionError, ConnectionResetError, Exception ) as e:
-            logger.debug(f"Exception input: {e}")
+        #except (socket.error, ConnectionError, ConnectionResetError, Exception ) as e:
+            #logger.debug(f"Exception input: {e}")
 
 
 """
@@ -802,7 +808,7 @@ async def main(client, cp):
     """
     loop = asyncio.get_running_loop()
     client_server = await loop.create_server(
-        ClientCommunicationProtocol,
+        create_protocol(client),
         '127.0.0.1', 
         int(cp)
     )
@@ -840,9 +846,10 @@ if __name__ == "__main__":
     """
     Start a server
     """
-    try:
-        asyncio.run(main(client, args.cp))
-    except Exception as e:
-        print(f"server error {e}")
-    except KeyboardInterrupt:
-        print('Server stopped manually')
+    #try:
+    asyncio.run(main(client, args.cp))
+    # Exception as e:
+        #print(f"server error {e}")
+    #except KeyboardInterrupt:
+    #except IndexError:
+        #print('Server stopped manually')
