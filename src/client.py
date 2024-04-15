@@ -46,7 +46,7 @@ class Client:
         pass
 
     def login(self, uname, pswd):
-        #try:
+        try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.connect((constant.SERVER_ADDRESS, constant.SERVER_PORT))
                 s.settimeout(10.0) # set socket time out in 10 second
@@ -177,15 +177,16 @@ class Client:
                                               constant.SERVER_ADDRESS, constant.SERVER_PORT)
                     print(f"Login success {uname}!")
 
-        #except socket.timeout:
-            #print("No data received within the time limit, closing socket.")
-            #s.close()
-        #except (socket.error, ConnectionError, ConnectionResetError) as e:
-            #logger.debug(f"Exception login: {e}")
-            #s.close()
-            #return False
+        except socket.timeout:
+            print("No data received within the time limit, closing socket.")
+            s.close()
+    
+        except (socket.error, ConnectionError, ConnectionResetError) as e:
+            logger.debug(f"Exception login: {e}")
+            s.close()
+            return False
 
-            return True
+        return True
 
 
 
@@ -235,7 +236,7 @@ class ClientCommunicationProtocol(asyncio.Protocol):
 
 
     async def process_message(self, message, addr):
-        #try:
+        try:
             match message.get('op_code'):
                 case constant.OP_AUTH:
                     await self.on_auth(message, addr)
@@ -243,14 +244,14 @@ class ClientCommunicationProtocol(asyncio.Protocol):
                 case constant.OP_MSG:
                     await self.recv_comm_message(message)
 
-        #except Exception as e:
-            #logger.error(f"Error processing message: {e}")
-            #self.transport.write(util_funcs.pack_message({
-                #"op_code": constant.OP_ERROR,
-                #"event": "error",
-                #"payload": ""
-            #}))
-            #self.transport.close()
+        except Exception as e:
+            logger.error(f"Error processing message: {e}")
+            self.transport.write(util_funcs.pack_message({
+                "op_code": constant.OP_ERROR,
+                "event": "error",
+                "payload": ""
+            }))
+            self.transport.close()
         
 
     """
@@ -309,6 +310,7 @@ class ClientCommunicationProtocol(asyncio.Protocol):
             KDC_msg = await reader.read(4096)
             writer.close()
             await writer.wait_closed()
+            print("writer_server closed")
             
 
             """
@@ -453,7 +455,7 @@ class ClientCommunicationProtocol(asyncio.Protocol):
 Send message in communication
 """
 async def send_comm_message(client, destination, message_text):
-    #try:
+    try:
             
             destination_dh_key = client.key_manager.get_dh_key_by_username(destination)
             dest_addr, dest_port = client.key_manager.get_addr_by_username(destination)
@@ -637,6 +639,7 @@ async def send_comm_message(client, destination, message_text):
 
                 writer.close()
                 await writer.wait_closed()
+                print("writer closed")
 
             print("already connected")
             reader_send, writer_send = await asyncio.open_connection(dest_addr, dest_port)
@@ -661,21 +664,22 @@ async def send_comm_message(client, destination, message_text):
             logger.debug(f"sent {send_msg_iv} to {destination}") 
 
             writer_send.close()
-            await writer_send.wait_closed()   
+            await writer_send.wait_closed()
+            print("writer_send closed")   
     
-    #except socket.timeout:
-        #print("No data received within the time limit, closing socket.")
+    except socket.timeout:
+        print("No data received within the time limit, closing socket.")
 
-    #except (socket.error, ConnectionError, ConnectionResetError, Exception) as e:
-        #print(f"Failed to send message to {destination}")
-        #logger.debug(f"Exception sending message: {e}")
+    except (socket.error, ConnectionError, ConnectionResetError, Exception) as e:
+        print(f"Failed to send message to {destination}")
+        logger.debug(f"Exception sending message: {e}")
 
 
 """
 Send list reqest to KDC
 """
 async def list_request(client):
-    #try:
+    try:
         temp_dh_key = None
         temp_login_uname = ""
         async with lock:
@@ -731,13 +735,13 @@ async def list_request(client):
             logger.debug(f"Complete list request")
             return user_json_list
 
-    #except socket.timeout:
-        #print("No data received within the time limit, closing socket.")
-        #s.close()
+    except socket.timeout:
+        print("No data received within the time limit, closing socket.")
+        s.close()
     
-    #except (socket.error, ConnectionError, ConnectionResetError, Exception) as e:
-            #logger.debug(f"Exception request list: {e}")
-            #s.close()
+    except (socket.error, ConnectionError, ConnectionResetError, Exception) as e:
+            logger.debug(f"Exception request list: {e}")
+            s.close()
 
 
 """
@@ -770,27 +774,27 @@ Handle user input command
 async def handle_input(client):
     while True:
         input_cmd = (await aioconsole.ainput()).split()
-        #try: 
-        match input_cmd[0]:
-            case  "list":
-                # send list request to KDC
-                user_json_list = await list_request(client)
-                print(f"users list: {list(user_json_list.keys())}")
-                # update client users list
-                async with lock:
-                     client.users_list = user_json_list
+        try: 
+            match input_cmd[0]:
+                case  "list":
+                    # send list request to KDC
+                    user_json_list = await list_request(client)
+                    print(f"users list: {list(user_json_list.keys())}")
+                    # update client users list
+                    async with lock:
+                        client.users_list = user_json_list
                     
-            case "send":
-                # start communication with another client
-                # check user name
-                if input_cmd[1] == "KDC":
-                    print("Cannot send message to KDC")
-                else:
-                    print("pending to send auth message")
-                    await send_comm_message(client, input_cmd[1], input_cmd[2])
+                case "send":
+                    # start communication with another client
+                    # check user name
+                    if input_cmd[1] == "KDC":
+                        print("Cannot send message to KDC")
+                    else:
+                        print("pending to send auth message")
+                        await send_comm_message(client, input_cmd[1], input_cmd[2])
 
-        #except (socket.error, ConnectionError, ConnectionResetError, Exception ) as e:
-            #logger.debug(f"Exception input: {e}")
+        except (socket.error, ConnectionError, ConnectionResetError, Exception ) as e:
+            logger.debug(f"Exception input: {e}")
 
 
 """
@@ -844,10 +848,10 @@ if __name__ == "__main__":
     """
     Start a server
     """
-    #try:
-    asyncio.run(main(client, args.cp))
-    # Exception as e:
-        #print(f"server error {e}")
-    #except KeyboardInterrupt:
-    #except IndexError:
-        #print('Server stopped manually')
+    try:
+        asyncio.run(main(client, args.cp))
+
+    except Exception as e:
+        print(f"server error {e}")
+    except KeyboardInterrupt:
+        print('Server stopped manually')
