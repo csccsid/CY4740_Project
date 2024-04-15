@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import base64
+import datetime
 import json
 import logging
 import math
@@ -50,6 +51,18 @@ def parse_arguments():
     return parser.parse_args()
 
 
+def verify_timestamp(message_timestamp, validity_period=120):
+    # Current time in UTC
+    now = datetime.datetime.now(datetime.timezone.utc)
+    current_timestamp = int(now.timestamp())
+
+    # Check if the current timestamp is within the valid time period
+    if current_timestamp - message_timestamp <= validity_period:
+        return True
+    else:
+        return False
+
+
 class TCPAuthServerProtocol(asyncio.Protocol):
     key_manager = AuthenticationKeyManager()
     lock = asyncio.Lock()
@@ -82,6 +95,8 @@ class TCPAuthServerProtocol(asyncio.Protocol):
             match message.get("op_code"):
                 case 1:
                     await self.on_login(message, addr)
+                case 2:
+                    self.on_logout(message, addr)
                 case 3:
                     self.on_auth(message, addr)
                 case 4:
@@ -90,6 +105,50 @@ class TCPAuthServerProtocol(asyncio.Protocol):
         except Exception as e:
             logger.error(f"Error processing message: {e}")
             self.transport.close()
+
+    def on_logout(self, message, addr):
+        """
+        Handles client log out request, the login state will be terminated under the following conditions:
+        1. The session has been established for more than 30 minutes.
+        2. The client manually send the logout request to server.
+        In both cases, the server will delete client's shared key from key manager.
+
+        The logout request payload should be encrypted with the shared session key, with content:
+        {
+            "timestamp": <timestamp>
+            "username": <username>
+        }
+
+        """
+        if message["event"] == "logout":
+            logout_payload = json.loads(message["payload"])
+
+            logout_request_cipher = logout_payload['ciphertext']
+            logout_request_iv = logout_payload['iv']
+            logout_request_user = logout_payload['username']
+
+            if (logout_request_cipher is None
+                    or logout_request_iv is None
+                    or logout_request_user is None):
+                self.reset_connection(f"Invalid logout request: {message['payload']}")
+                return
+
+            logout_request_user_dh_key = self.key_manager.get_dh_key_by_username(logout_request_user)
+            logout_request = decrypt_with_dh_key(logout_request_user_dh_key,
+                                                 logout_request_cipher,
+                                                 logout_request_iv)
+
+            if logout_request is None:
+                self.reset_connection(f"Invalid logout request: {message['payload']}")
+                return
+
+            if (verify_timestamp(logout_request['timestamp'])
+                    and logout_request['username'] == logout_request_user):
+                self.key_manager.remove_user(logout_request_user)
+                print(f'Logged out user: {logout_request_user}')
+            else:
+                self.reset_connection(f"Invalid timestamp: {logout_request['timestamp']}")
+                return
 
     def on_auth(self, message, addr):
         """
@@ -143,7 +202,7 @@ class TCPAuthServerProtocol(asyncio.Protocol):
 
                 # check if the sender, receiver addr matches
                 elif (client_recv_payload['comm_source'] != client_source_payload['comm_source']
-                        or client_recv_payload['comm_recv'] != client_source_payload['comm_recv']):
+                      or client_recv_payload['comm_recv'] != client_source_payload['comm_recv']):
                     self.reset_connection(f"Receiver or Sender mismatch")
                 else:
                     nonce_db.insert_one({'nonce': client_recv_payload['nonce']})
