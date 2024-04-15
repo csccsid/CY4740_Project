@@ -64,6 +64,11 @@ def parse_arguments():
     return parser.parse_args()
 
 
+"""
+Main entry point for the client side application, mainly used as a storage node and for action delegation
+"""
+
+
 class Client:
     key_manager = AuthenticationKeyManager()
 
@@ -250,7 +255,6 @@ class Client:
     async def logout(self):
         """
         Notify the server that we have logged out, no response needed
-        :return:
         """
         reader, writer = await asyncio.open_connection(self.server_ip, self.server_port)
 
@@ -285,6 +289,14 @@ class Client:
             logger.debug(f'TCP connection closed with {self.server_ip, self.server_port}')
 
     async def send_msg(self, dest_username, dest_content):
+        """
+        Attempts to send message to the designated user, if there exist a shared DH key between us and destination,
+        then sends the message encrypted directly, if not start the otway rees protocol to establish a hide-from-server
+        dh key
+        :param dest_username: destination username
+        :param dest_content: message content #TDDO: input validation?
+        :return:
+        """
         dest_user_info = self.user_list.get(dest_username)
         dest_service_ip = dest_user_info.get("client_service_addr")
         dest_service_port = dest_user_info.get("client_service_port")
@@ -652,6 +664,7 @@ class TCPClientServerProtocol(asyncio.Protocol):
                 await close_tcp_connection(writer, f'TCP connection closed with {server_ip, server_port}')
 
         elif message["event"] == "dh_establishment_request" and self.auth_stage == "AWAIT_DH_REQ":
+            # the receiver is now receiving the dh modulo from sender
             dh_request_payload = json.loads(message["payload"])
 
             dh_request_content = decrypt_with_key(get_sha256_dh_key(self.kdc_key),
@@ -697,6 +710,9 @@ class TCPClientServerProtocol(asyncio.Protocol):
             self.transport.write(json.dumps(dh_response).encode())
 
     def connection_lost(self, exc):
+        """
+        Called when connection is terminated from the other end.
+        """
         if exc:
             logger.debug(f"Error on connection: {exc}")
         else:
