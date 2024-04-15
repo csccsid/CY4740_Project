@@ -615,9 +615,8 @@ async def send_comm_message(client, destination, message_text):
                 destination_dh_key = pow(establ_chal_json['recv_modulo'], comm_exponent, constant.P)
                 # add destination to connect list
                 client.key_manager.add_user(destination, destination_dh_key, dest_addr, dest_port)
-                source_service_port = None
-                async with lock:
-                    source_service_port = client.cp
+                source_service_port = client.cp
+
                 estab_chal_resp = {
                     "estab_recv_nonce": establ_chal_json['estab_recv_nonce'],
                     "source_service_port": source_service_port
@@ -639,11 +638,10 @@ async def send_comm_message(client, destination, message_text):
                 writer.close()
                 await writer.wait_closed()
 
-
             print("already connected")
             reader_send, writer_send = await asyncio.open_connection(dest_addr, dest_port)
             logger.debug(f"Connect to server for sending message to {destination}")
-
+            print("build reader writer")
                 
             msg_json = {"msg": message_text}
             msg_cipher, send_msg_iv = crypto.encrypt_with_dh_key(dh_key=destination_dh_key, 
