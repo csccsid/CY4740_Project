@@ -25,10 +25,13 @@ from util.crypto import (
     verify_signature,
     decrypt_with_key_prime,
     encrypt_with_dh_key,
+    get_sha256_dh_key,
+    encrypt_with_key,
+    decrypt_with_key
 )
 
 from constant import (
-    G, P, OP_LOGIN, OP_CMD, OP_LOGOUT, OP_AUTH
+    G, P, OP_LOGIN, OP_CMD, OP_LOGOUT, OP_AUTH, OP_MSG
 )
 
 server_public_key = None
@@ -342,6 +345,7 @@ class Client:
 
                 # the following requests should be handled with TCPClientServerProtocol
 
+                # should receive the auth request response back from destination
                 otway_forward_response_buffer = await reader.read(4096)
                 otway_forward_response = json.loads(otway_forward_response_buffer.decode('ascii'))
                 otway_forward_payload = json.loads(otway_forward_response["payload"])
@@ -361,11 +365,85 @@ class Client:
 
                 auth_channel_key = otway_forward_content['channel_key']
 
+                # now we start to establish the channel key between clients for identity hiding from server.
+
+                sender_private_key = generate_dh_private_key()
+                sender_dh_modulo = pow(G, sender_private_key, P)
+                dh_sender_nonce = generate_nonce()
+
+                dh_request_content = {
+                    "sender_nonce": dh_sender_nonce,
+                    "sender_modulo": sender_dh_modulo
+                }
+
+                dh_request_ciphertext, dh_request_gcm_nonce, dh_request_gcm_tag = encrypt_with_key(
+                    get_sha256_dh_key(auth_channel_key),
+                    dh_request_content
+                )
+
+                dh_request_payload = {
+                    "ciphertext": dh_request_ciphertext,
+                    "gcm_nonce": dh_request_gcm_nonce,
+                    "gcm_tag": dh_request_gcm_tag
+                }
+
+                dh_request = {
+                    "op_code": OP_AUTH,
+                    "event": "dh_establishment_request",
+                    "payload": json.dumps(dh_request_payload)
+                }
+
+                writer.write(json.dumps(dh_request).encode())
+                await writer.drain()
+
+                dh_response_buffer = await reader.read(4096)
+                dh_response = json.loads(dh_response_buffer.decode('ascii'))
+                dh_response_payload = json.loads(dh_response["payload"])
+
+                dh_cipher = dh_response_payload["ciphertext"]
+                dh_gcm_nonce = dh_response_payload["gcm_nonce"]
+                dh_gcm_tag = dh_response_payload["gcm_tag"]
+
+                dh_response_content = decrypt_with_key(get_sha256_dh_key(auth_channel_key),
+                                                       dh_cipher,
+                                                       dh_gcm_nonce,
+                                                       dh_gcm_tag)
+
+                if dh_response_content['sender_nonce'] != dh_sender_nonce:
+                    await close_tcp_connection(writer, f'Mismatch nonce')
+                    exit(1)
+
+                dh_key = pow(dh_response_content['receiver_modulo'], sender_private_key, P)
+
                 client_instance.key_manager.add_user(dest_user_info_dict['username'],
-                                                     auth_channel_key,
+                                                     dh_key,
                                                      dest_user_info_dict['client_service_addr'],
                                                      dest_user_info_dict['client_service_port'])
 
+            message_content = {
+                'message': dest_content
+            }
+
+            (message_cipher,
+             message_gcm_nonce,
+             message_gcm_tag) = encrypt_with_dh_key(self.key_manager.get_dh_key_by_username(dest_username),
+                                                    message_content)
+
+            message_payload = {
+                'sender_username': self.username,
+                'ciphertext': message_cipher,
+                'gcm_nonce': message_gcm_nonce,
+                'gcm_tag': message_gcm_tag
+            }
+
+            message_package = {
+                "op_code": OP_MSG,
+                "event": "message",
+                "payload": json.dumps(message_payload)
+            }
+
+            writer.write(json.dumps(message_package).encode())
+            await writer.drain()
         finally:
             writer.close()
             await writer.wait_closed()
@@ -375,12 +453,17 @@ class Client:
 async def handle_messages():
     while True:
         command = await ainput("")
-        command_list = command.split(" ")
+        command_list = command.split(" ", 2)
         match command_list[0].lower():
             case "list":
                 await client_instance.list()
             case "send":
-                await client_instance.send_msg(dest_username=command_list[1], dest_content=command_list[2:])
+                if len(command_list) < 3:
+                    print("Not enough arguments for send command.")
+                    continue  # Skip the rest of the loop if arguments are missing
+                dest_username = command_list[1]  # Second word as dest_username
+                dest_content = command_list[2]  # The rest as dest_content
+                await client_instance.send_msg(dest_username=dest_username, dest_content=dest_content)
             case "exit":
                 await client_instance.logout()
                 exit(0)
@@ -398,16 +481,25 @@ class TCPClientServerProtocol(asyncio.Protocol):
     def __init__(self):
         super().__init__()
         self.transport = None
+        self.auth_stage = "AWAIT_AUTH_REQ"
+        self.kdc_key = None
+        self.dh_nonce = None
+        self.secret_key = None
+        self.sender_modulo = None
+        self.dh_key = None
+        self.client_service_port = None
+        self.client_service_addr = None
+        self.sender_username = None
 
     def connection_made(self, transport):
         self.transport = transport
         peername = transport.get_extra_info('peername')
-        print(f"Connection from {peername}")
+        logger.debug(f"Connection from {peername}")
 
     def data_received(self, data):
         message = json.loads(data.decode())
         addr = self.transport.get_extra_info('peername')
-        print(f"Received message from {addr}: {message}")
+        logger.debug(f"Received message from {addr}: {message}")
         asyncio.create_task(self.process_message(message, addr))
 
     async def process_message(self, message, addr):
@@ -416,13 +508,31 @@ class TCPClientServerProtocol(asyncio.Protocol):
             match message.get("op_code"):
                 case 3:
                     await self.on_auth(message, addr)
+                case 5:
+                    await self.on_msg(message, addr)
 
         except Exception as e:
             logger.error(f"Error processing message: {e}")
             self.transport.close()
 
+    async def on_msg(self, message, addr):
+        if message['event'] == 'message':
+            message_payload = json.loads(message["payload"])
+            message_cipher = message_payload['ciphertext']
+            message_gcm_nonce = message_payload['gcm_nonce']
+            message_gcm_tag = message_payload['gcm_tag']
+            message_sender = message_payload['sender_username']
+
+            dh_key = client_instance.key_manager.get_dh_key_by_username(message_sender)
+            message_content = decrypt_with_dh_key(
+                dh_key,
+                message_cipher, message_gcm_nonce, message_gcm_tag
+            )
+
+            print(f"from {message_sender}: {message_content['message']}")
+
     async def on_auth(self, message, addr):
-        if message["event"] == "auth_init_request":
+        if message["event"] == "auth_init_request" and self.auth_stage == "AWAIT_AUTH_REQ":
             """
             Upon receiving the auth request, the receiver should perform the following:
             1. remove the plaintext session identifier
@@ -482,7 +592,7 @@ class TCPClientServerProtocol(asyncio.Protocol):
                         "payload": json.dumps(otway_payload)
                     }
 
-                    print(f"Sending {otway_forward_request}")
+                    logger.debug(f"Sending {otway_forward_request}")
                     otway_init_request_ready = json.dumps(otway_forward_request).encode()
                     writer.write(otway_init_request_ready)
                     await writer.drain()
@@ -513,10 +623,11 @@ class TCPClientServerProtocol(asyncio.Protocol):
 
                     receiver_auth_channel_key = receiver_auth_content['channel_key']
 
-                    client_instance.key_manager.add_user(auth_sender_info['username'],
-                                                         receiver_auth_channel_key,
-                                                         auth_sender_info['client_service_addr'],
-                                                         auth_sender_info['client_service_port'])
+                    self.sender_username = auth_sender_info['username']
+                    self.client_service_addr = auth_sender_info['client_service_addr']
+                    self.client_service_port = auth_sender_info['client_service_port']
+
+                    self.kdc_key = receiver_auth_channel_key
 
                     otway_forward_response_content = {
                         'sender_ciphertext': otway_forward_payload['sender_ciphertext'],
@@ -531,18 +642,68 @@ class TCPClientServerProtocol(asyncio.Protocol):
                     }
 
                     self.transport.write(json.dumps(otway_forward_sender_response).encode('ascii'))
+                    self.auth_stage = "AWAIT_DH_REQ"
 
+                    # no longer need to maintain connection between server
+                    await close_tcp_connection(writer, f'TCP connection closed with {server_ip, server_port}')
+
+                    # but still needs to wait for sender DH modulo
             finally:
                 await close_tcp_connection(writer, f'TCP connection closed with {server_ip, server_port}')
 
+        elif message["event"] == "dh_establishment_request" and self.auth_stage == "AWAIT_DH_REQ":
+            dh_request_payload = json.loads(message["payload"])
+
+            dh_request_content = decrypt_with_key(get_sha256_dh_key(self.kdc_key),
+                                                  dh_request_payload['ciphertext'],
+                                                  dh_request_payload['gcm_nonce'],
+                                                  dh_request_payload['gcm_tag'])
+
+            self.dh_nonce = generate_nonce()
+            self.secret_key = generate_dh_private_key()
+            self.sender_modulo = dh_request_content['sender_modulo']
+            self.dh_key = pow(self.sender_modulo, self.secret_key, P)
+
+            client_instance.key_manager.add_user(self.sender_username,
+                                                 self.dh_key,
+                                                 self.client_service_addr,
+                                                 self.client_service_port)
+
+            receiver_modulo = pow(G, self.secret_key, P)
+
+            dh_response_content = {
+                "sender_nonce": dh_request_content['sender_nonce'],
+                "receiver_nonce": self.dh_nonce,
+                "receiver_modulo": receiver_modulo
+            }
+
+            dh_response_ciphertext, dh_response_gcm_nonce, dh_response_gcm_tag = encrypt_with_key(
+                get_sha256_dh_key(self.kdc_key),
+                dh_response_content
+            )
+
+            dh_response_payload = {
+                "ciphertext": dh_response_ciphertext,
+                "gcm_nonce": dh_response_gcm_nonce,
+                "gcm_tag": dh_response_gcm_tag
+            }
+
+            dh_response = {
+                "op_code": OP_AUTH,
+                "event": "dh_establishment_response",
+                "payload": json.dumps(dh_response_payload)
+            }
+
+            self.transport.write(json.dumps(dh_response).encode())
+
     def connection_lost(self, exc):
         if exc:
-            print(f"Error on connection: {exc}")
+            logger.debug(f"Error on connection: {exc}")
         else:
-            print("Connection closed by client.")
+            logger.debug("Connection closed by client.")
 
         self.__init__()
-        print("Client info reset completed")
+        logger.debug("Client info reset completed")
         super().connection_lost(exc)
 
 
