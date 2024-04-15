@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 import argon2
 from KeyManager import AuthenticationKeyManager
 import constant
+import aioconsole
 
 from util import util_funcs, crypto
 
@@ -764,7 +765,7 @@ Handle user input command
 """
 async def handle_input(client):
     while True:
-        input_cmd = input().split()
+        input_cmd = (await aioconsole.ainput()).split()
         try: 
             match input_cmd[0]:
                 case  "list":
@@ -801,16 +802,17 @@ async def main(client, cp):
     """
     loop = asyncio.get_running_loop()
     client_server = await loop.create_server(
-        create_protocol(client),
+        ClientCommunicationProtocol,
         '127.0.0.1', 
-        cp
+        int(cp)
     )
     print("ready to exchange message...")
 
     async with client_server:
         input_task = loop.create_task(handle_input(client))
+        server_task = loop.create_task(client_server.serve_forever())
 
-        await asyncio.wait([client_server.serve_forever(), input_task], return_when=asyncio.ALL_COMPLETED)
+        await asyncio.wait([server_task , input_task], return_when=asyncio.ALL_COMPLETED)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Secure Messaging")
@@ -840,5 +842,7 @@ if __name__ == "__main__":
     """
     try:
         asyncio.run(main(client, args.cp))
+    except Exception as e:
+        print(f"server error {e}")
     except KeyboardInterrupt:
         print('Server stopped manually')
