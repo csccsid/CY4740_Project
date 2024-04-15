@@ -100,7 +100,6 @@ class TCPAuthServerProtocol(asyncio.Protocol):
                     self.on_auth(message, addr)
                 case 4:
                     self.on_cmd(message, addr)
-
         except Exception as e:
             logger.error(f"Error processing message: {e}")
             self.transport.close()
@@ -161,22 +160,22 @@ class TCPAuthServerProtocol(asyncio.Protocol):
         :param addr: address of that receiver client
         """
 
-        if message["event"] == "request_forward":
-            client_auth_payload = message["payload"]
+        if message["event"] == "auth_forward_request":
+            client_auth_payload = json.loads(message["payload"])
 
-            client_source = client_auth_payload["comm_source"]
-            client_recv = client_auth_payload["comm_recv"]
+            sender_info = json.loads(client_auth_payload['sender_info'])
+            receiver_info = json.loads(client_auth_payload['receiver_info'])
 
-            client_source_dh_key = self.key_manager.get_dh_key_by_username(client_source)
-            client_recv_dh_key = self.key_manager.get_dh_key_by_username(client_recv)
+            client_send_dh_key = self.key_manager.get_dh_key_by_username(sender_info['username'])
+            client_recv_dh_key = self.key_manager.get_dh_key_by_username(receiver_info['username'])
 
-            client_source_cipher = client_auth_payload["ciphertext_source"]
-            client_source_gcm_nonce = client_auth_payload["cipher_source_gcm_nonce"]
-            client_source_gcm_tag = client_auth_payload["cipher_source_gcm_tag"]
+            client_source_cipher = client_auth_payload["sender_ciphertext"]
+            client_source_gcm_nonce = client_auth_payload["sender_gcm_nonce"]
+            client_source_gcm_tag = client_auth_payload["sender_gcm_tag"]
 
-            client_recv_cipher = client_auth_payload["ciphertext_recv"]
-            client_recv_gcm_nonce = client_auth_payload["cipher_recv_gcm_nonce"]
-            client_recv_gcm_tag = client_auth_payload["cipher_recv_gcm_tag"]
+            client_recv_cipher = client_auth_payload["receiver_ciphertext"]
+            client_recv_gcm_nonce = client_auth_payload["receiver_gcm_nonce"]
+            client_recv_gcm_tag = client_auth_payload["receiver_gcm_tag"]
 
             if any(v is None for v in [
                 client_source_cipher,
@@ -184,14 +183,14 @@ class TCPAuthServerProtocol(asyncio.Protocol):
                 client_recv_cipher,
                 client_source_gcm_tag,
                 client_recv_gcm_nonce,
-                client_source_dh_key,
+                client_send_dh_key,
                 client_recv_dh_key,
                 client_recv_gcm_tag
             ]):
-                self.reset_connection(f"Bad request for on_auth between {client_source} and {client_recv}")
+                self.reset_connection(f"Bad request for on_auth between {sender_info} and {receiver_info}")
             else:
 
-                client_source_payload = decrypt_with_dh_key(client_source_dh_key,
+                client_source_payload = decrypt_with_dh_key(client_send_dh_key,
                                                             client_source_cipher,
                                                             client_source_gcm_nonce,
                                                             client_source_gcm_tag)
@@ -203,27 +202,28 @@ class TCPAuthServerProtocol(asyncio.Protocol):
 
                 # entering a series of checking,
                 # check if the session identifier match or has been replayed
-                if (client_recv_payload['nonce'] != client_source_payload['nonce']
-                        or nonce_db.find_one({'nonce': client_recv_payload['nonce']})):
+                if (client_recv_payload['session_identifier'] != client_source_payload['session_identifier']
+                        or nonce_db.find_one({'nonce': client_recv_payload['session_identifier']})):
                     self.reset_connection(f"Invalid nonce, possible replay attack")
 
                 # check if the sender, receiver addr matches
-                elif (client_recv_payload['comm_source'] != client_source_payload['comm_source']
-                      or client_recv_payload['comm_recv'] != client_source_payload['comm_recv']):
+                elif (client_recv_payload['sender_info'] != client_source_payload['sender_info']
+                      or client_recv_payload['receiver_info'] != client_source_payload['receiver_info']):
                     self.reset_connection(f"Receiver or Sender mismatch")
+
                 else:
-                    nonce_db.insert_one({'nonce': client_recv_payload['nonce']})
+                    nonce_db.insert_one({'nonce': client_recv_payload['session_identifier']})
 
                     client_shared_key = generate_dh_private_key()
-                    M_nonce = client_recv_payload['nonce']
+                    M_nonce = client_recv_payload['session_identifier']
 
                     client_recv_payload = {
-                        'nonce': client_recv_payload['recv_nonce'],
+                        'receiver_nonce': client_recv_payload['receiver_nonce'],
                         'channel_key': client_shared_key
                     }
 
                     client_source_payload = {
-                        'nonce': client_source_payload['nonce_source'],
+                        'sender_nonce': client_source_payload['sender_nonce'],
                         'channel_key': client_shared_key
                     }
 
@@ -237,18 +237,18 @@ class TCPAuthServerProtocol(asyncio.Protocol):
                     (client_source_payload_cipher,
                      client_source_payload_gcm_nonce,
                      client_source_payload_gcm_tag) = encrypt_with_dh_key(
-                        client_source_dh_key,
+                        client_send_dh_key,
                         client_source_payload
                     )
 
                     payload_json = {
-                        'nonce': M_nonce,
-                        'ciphertext_source': client_source_payload_cipher,
-                        'cipher_source_gcm_nonce': client_source_payload_gcm_nonce,
-                        'cipher_source_gcm_tag': client_source_payload_gcm_tag,
-                        'ciphertext_recv': client_recv_payload_cipher,
-                        'cipher_recv_gcm_nonce': client_recv_payload_gcm_nonce,
-                        'cipher_recv_gcm_tag': client_recv_payload_gcm_tag
+                        'session_identifier': M_nonce,
+                        'sender_ciphertext': client_source_payload_cipher,
+                        'sender_gcm_nonce': client_source_payload_gcm_nonce,
+                        'sender_gcm_tag': client_source_payload_gcm_tag,
+                        'receiver_ciphertext': client_recv_payload_cipher,
+                        'receiver_gcm_nonce': client_recv_payload_gcm_nonce,
+                        'receiver_gcm_tag': client_recv_payload_gcm_tag
                     }
 
                     auth_request_response = {
@@ -258,7 +258,7 @@ class TCPAuthServerProtocol(asyncio.Protocol):
                     }
 
                     self.transport.write(json.dumps(auth_request_response).encode('ascii'))
-
+                    print(f"Send KDC response: {auth_request_response}")
                     print(f"Auth request response sent to {addr}")
 
         else:

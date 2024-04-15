@@ -78,7 +78,14 @@ class Client:
         self.user_list = {}
         self.otwayrees_list = {}
         self.user_info = {'client_service_addr': self.host,
-                          'client_service_port': self.client_service_port}
+                          'client_service_port': self.client_service_port,
+                          'username': self.username}
+
+    def get_server_addr(self):
+        return self.server_ip, self.server_port
+
+    def get_server_dh_key(self):
+        return self.dh_key
 
     async def login(self):
         """
@@ -294,8 +301,14 @@ class Client:
                     "auth_status": "AWAIT_RECEIVER_RESP"
                 }
 
+                dest_user_info_dict = {
+                    'client_service_addr': dest_service_ip,
+                    'client_service_port': dest_service_port,
+                    'username': dest_username
+                }
+
                 sender_info_dump = json.dumps(self.user_info)
-                receiver_info_dump = json.dumps(dest_user_info)
+                receiver_info_dump = json.dumps(dest_user_info_dict)
 
                 sender_payload = {
                     "sender_nonce": sender_nonce,
@@ -324,11 +337,35 @@ class Client:
                 }
 
                 otway_init_request_ready = json.dumps(otway_init_request).encode()
-
                 writer.write(otway_init_request_ready)
                 await writer.drain()
 
                 # the following requests should be handled with TCPClientServerProtocol
+
+                otway_forward_response_buffer = await reader.read(4096)
+                otway_forward_response = json.loads(otway_forward_response_buffer.decode('ascii'))
+                otway_forward_payload = json.loads(otway_forward_response["payload"])
+
+                otway_forward_cipher = otway_forward_payload["sender_ciphertext"]
+                otway_forward_gcm_nonce = otway_forward_payload["sender_gcm_nonce"]
+                otway_forward_gcm_tag = otway_forward_payload["sender_gcm_tag"]
+
+                otway_forward_content = decrypt_with_dh_key(client_instance.get_server_dh_key(),
+                                                            otway_forward_cipher,
+                                                            otway_forward_gcm_nonce,
+                                                            otway_forward_gcm_tag)
+
+                if otway_forward_content['sender_nonce'] != sender_nonce:
+                    await close_tcp_connection(writer, f"Mismatch sender nonce, weird, aborting")
+                    exit(1)
+
+                auth_channel_key = otway_forward_content['channel_key']
+
+                client_instance.key_manager.add_user(dest_user_info_dict['username'],
+                                                     auth_channel_key,
+                                                     dest_user_info_dict['client_service_addr'],
+                                                     dest_user_info_dict['client_service_port'])
+
         finally:
             writer.close()
             await writer.wait_closed()
@@ -337,13 +374,22 @@ class Client:
 
 async def handle_messages():
     while True:
-        message = await ainput("")
-        match message.lower():
+        command = await ainput("")
+        command_list = command.split(" ")
+        match command_list[0].lower():
             case "list":
                 await client_instance.list()
+            case "send":
+                await client_instance.send_msg(dest_username=command_list[1], dest_content=command_list[2:])
             case "exit":
                 await client_instance.logout()
                 exit(0)
+
+
+async def close_tcp_connection(writer, log):
+    writer.close()
+    await writer.wait_closed()
+    logger.debug(log)
 
 
 class TCPClientServerProtocol(asyncio.Protocol):
@@ -369,14 +415,125 @@ class TCPClientServerProtocol(asyncio.Protocol):
             # Using int rather than OP_XXX because of some python match case issue.
             match message.get("op_code"):
                 case 3:
-                    self.on_auth(message, addr)
+                    await self.on_auth(message, addr)
 
         except Exception as e:
             logger.error(f"Error processing message: {e}")
             self.transport.close()
 
-    def on_auth(self, message, addr):
-        pass
+    async def on_auth(self, message, addr):
+        if message["event"] == "auth_init_request":
+            """
+            Upon receiving the auth request, the receiver should perform the following:
+            1. remove the plaintext session identifier
+            2. append receiver auth payload
+            """
+            server_ip, server_port = client_instance.get_server_addr()
+            reader, writer = await asyncio.open_connection(server_ip, server_port)
+
+            try:
+                auth_init_request_payload = json.loads(message["payload"])
+                auth_session_identifier = auth_init_request_payload['session_identifier']
+                auth_sender_info = json.loads(auth_init_request_payload['sender_info'])
+                auth_receiver_info = json.loads(auth_init_request_payload['receiver_info'])
+                auth_sender_ciphertext = auth_init_request_payload['sender_ciphertext']
+                auth_sender_sender_gcm_nonce = auth_init_request_payload['sender_gcm_nonce']
+                auth_sender_sender_gcm_tag = auth_init_request_payload['sender_gcm_tag']
+
+                if any(v is None for v in [
+                    auth_session_identifier,
+                    auth_sender_info,
+                    auth_receiver_info,
+                    auth_sender_ciphertext,
+                    auth_sender_sender_gcm_nonce,
+                    auth_sender_sender_gcm_tag
+                ]):
+                    logger.error(f"Invalid auth request")
+                    self.transport.close()
+                else:
+                    auth_forward_nonce = generate_nonce()
+
+                    receiver_payload = {
+                        "receiver_nonce": auth_forward_nonce,
+                        "session_identifier": auth_session_identifier,
+                        "sender_info": auth_init_request_payload['sender_info'],
+                        "receiver_info": auth_init_request_payload['receiver_info']
+                    }
+
+                    (receiver_payload_cipher,
+                     receiver_payload_gcm_nonce,
+                     receiver_payload_gcm_tag) = encrypt_with_dh_key(client_instance.get_server_dh_key(),
+                                                                     receiver_payload)
+
+                    otway_payload = {
+                        "sender_info": auth_init_request_payload['sender_info'],
+                        "receiver_info": auth_init_request_payload['receiver_info'],
+                        "sender_ciphertext": auth_sender_ciphertext,
+                        "sender_gcm_nonce": auth_sender_sender_gcm_nonce,
+                        "sender_gcm_tag": auth_sender_sender_gcm_tag,
+                        "receiver_ciphertext": receiver_payload_cipher,
+                        "receiver_gcm_nonce": receiver_payload_gcm_nonce,
+                        "receiver_gcm_tag": receiver_payload_gcm_tag
+                    }
+
+                    otway_forward_request = {
+                        "op_code": OP_AUTH,
+                        "event": "auth_forward_request",
+                        "payload": json.dumps(otway_payload)
+                    }
+
+                    print(f"Sending {otway_forward_request}")
+                    otway_init_request_ready = json.dumps(otway_forward_request).encode()
+                    writer.write(otway_init_request_ready)
+                    await writer.drain()
+
+                    # patiently waits for KDC's response,
+                    # maybe worth a minute to get a cup of iced latte with oat milk and vanilla shots?
+                    otway_forward_response_buffer = await reader.read(4096)
+                    otway_forward_response = json.loads(otway_forward_response_buffer.decode('ascii'))
+                    otway_forward_payload = json.loads(otway_forward_response["payload"])
+
+                    if otway_forward_payload['session_identifier'] != auth_session_identifier:
+                        await close_tcp_connection(writer, f"Mismatch session identifier, dropping connection")
+                        exit(1)
+
+                    receiver_cipher = otway_forward_payload['receiver_ciphertext']
+                    receiver_gcm_nonce = otway_forward_payload['receiver_gcm_nonce']
+                    receiver_gcm_tag = otway_forward_payload['receiver_gcm_tag']
+
+                    receiver_auth_content = decrypt_with_dh_key(client_instance.get_server_dh_key(),
+                                                                receiver_cipher,
+                                                                receiver_gcm_nonce,
+                                                                receiver_gcm_tag)
+
+                    receiver_auth_nonce = receiver_auth_content['receiver_nonce']
+
+                    if receiver_auth_nonce != auth_forward_nonce:
+                        await close_tcp_connection(writer, f"Mismatch auth nonce, dropping")
+
+                    receiver_auth_channel_key = receiver_auth_content['channel_key']
+
+                    client_instance.key_manager.add_user(auth_sender_info['username'],
+                                                         receiver_auth_channel_key,
+                                                         auth_sender_info['client_service_addr'],
+                                                         auth_sender_info['client_service_port'])
+
+                    otway_forward_response_content = {
+                        'sender_ciphertext': otway_forward_payload['sender_ciphertext'],
+                        'sender_gcm_nonce': otway_forward_payload['sender_gcm_nonce'],
+                        'sender_gcm_tag': otway_forward_payload['sender_gcm_tag'],
+                    }
+
+                    otway_forward_sender_response = {
+                        "op_code": OP_AUTH,
+                        "event": "auth_forward_response",
+                        "payload": json.dumps(otway_forward_response_content)
+                    }
+
+                    self.transport.write(json.dumps(otway_forward_sender_response).encode('ascii'))
+
+            finally:
+                await close_tcp_connection(writer, f'TCP connection closed with {server_ip, server_port}')
 
     def connection_lost(self, exc):
         if exc:
