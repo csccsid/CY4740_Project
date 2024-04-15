@@ -90,7 +90,9 @@ class Client:
                 argons_params_json = response_payload_json["argon2_params"]
                 encry_challenge_encoded = response_payload_json["challenge"]
                 server_sign_encoded = response_payload_json["argon2_params_signature"]
-                iv_encoded = response_payload_json["iv"]
+                gcm_nonce_encoded = response_payload_json["gcm_nonce"]
+                gcm_tag_encoded = response_payload_json["gcm_tag_encoded"]
+
 
                 server_sign = base64.b64decode(server_sign_encoded)
                 if not util_funcs.check_signature(server_public_key, server_sign, json.dumps(argons_params_json).encode('ascii')):
@@ -128,7 +130,8 @@ class Client:
                     "password_hash": hash_pswd
                 }
 
-                challenge_string = crypto.decrypt_with_key_prime(key_json, encry_challenge_encoded, iv_encoded)
+                challenge_string = crypto.decrypt_with_key_prime(key_json, encry_challenge_encoded, 
+                                                                 gcm_nonce_encoded, gcm_tag_encoded)
                 challenge = json.loads(challenge_string)
 
                 if challenge["client_nonce"] != nonce:
