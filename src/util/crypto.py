@@ -241,8 +241,7 @@ def decrypt_with_dh_key(dh_key, cipher_text, nonce, tag):
     """
     dh_key_sha = get_sha256_dh_key(dh_key)
     # Convert the decrypted data back to a string (assuming it was originally a JSON string)
-    decrypted_string = decrypt_with_key(dh_key_sha, cipher_text, nonce, tag)
-    return json.loads(decrypted_string)
+    return decrypt_with_key(dh_key_sha, cipher_text, nonce, tag)
 
 
 def encrypt_with_dh_key(dh_key, data):

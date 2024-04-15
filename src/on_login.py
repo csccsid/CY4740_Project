@@ -30,6 +30,7 @@ GENERATOR = 2
 password = "ScoutTheStars!"
 username = "interstellar_scout"
 
+
 async def tcp_client(message, server_public_key, client_nonce, client_secret, host='127.0.0.1', port=12345):
     reader, writer = await asyncio.open_connection(host, port)
 
@@ -110,23 +111,7 @@ async def tcp_client(message, server_public_key, client_nonce, client_secret, ho
         challenge_resp = {"server_nonce": server_nonce, "client_service_port": 22}
 
         dh_key = pow(server_modulo, client_secret, PRIME)
-        """
-        bytes_length = (dh_key.bit_length() + 7) // 8  # Calculate the number of bytes needed
-        dh_key_bytes = dh_key.to_bytes(bytes_length, byteorder='big')
-        hash_object = hashlib.sha256(dh_key_bytes)
-        dh_key_sha = hash_object.digest()
 
-        chal_iv = os.urandom(16)
-        chal_cipher = Cipher(algorithms.AES(dh_key_sha), modes.CFB(chal_iv), backend=default_backend())
-        print("here")
-
-        chal_encryptor = chal_cipher.encryptor()
-        chal_ciphertext = chal_encryptor.update(json.dumps(challenge_resp).encode()) + chal_encryptor.finalize()
-
-        chal_ciphertext_encoded = base64.b64encode(chal_ciphertext).decode('ascii')
-        chal_iv_encoded = base64.b64encode(chal_iv).decode('ascii')
-        """
-        
         chal_ciphertext_encoded, chal_iv_encoded = encrypt_with_dh_key(dh_key, challenge_resp)
         chal_resp_content = {"ciphertext": chal_ciphertext_encoded, "iv": chal_iv_encoded}
         chal_resp = {"op_code": 1, "event": "challenge_response", "payload": json.dumps(chal_resp_content)}

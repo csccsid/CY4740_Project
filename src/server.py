@@ -17,7 +17,6 @@ from util.crypto import (
     encrypt_with_dh_key,
     encrypt_with_key_prime,
     sign_data,
-    get_sha256_dh_key
 )
 from util.db import cred_db_connect, nonce_db_connect
 
@@ -147,7 +146,7 @@ class TCPAuthServerProtocol(asyncio.Protocol):
             if (verify_timestamp(logout_request['timestamp'])
                     and logout_request['username'] == logout_request_user):
                 self.key_manager.remove_user(logout_request_user)
-                print(f'Logged out user: {logout_request_user}')
+                print(f'Logged out user: {logout_request_user} with addr {addr}')
             else:
                 self.reset_connection(f"Invalid timestamp: {logout_request['timestamp']}")
                 return
@@ -418,7 +417,7 @@ class TCPAuthServerProtocol(asyncio.Protocol):
                            "argon2_params_signature": argon2_params_signature_encoded,
                            "challenge": ciphertext_encoded,
                            "gcm_nonce": gcm_nonce_encoded,
-                           "gcm_tag_encoded": gcm_tag_encoded
+                           "gcm_tag": gcm_tag_encoded
                            }
 
                 auth_req_response = {
@@ -446,6 +445,7 @@ class TCPAuthServerProtocol(asyncio.Protocol):
                                                  nonce=chal_resp_payload["gcm_nonce"],
                                                  tag=chal_resp_payload["gcm_tag"])
 
+            print(f"Received challenge response: {decrypted_json}")
             # client should be able to use the password derived key to decrypt payload
             # and obtain server_nonce
             if decrypted_json.get("server_nonce") == self.server_nonce and decrypted_json.get("client_service_port"):
@@ -456,6 +456,7 @@ class TCPAuthServerProtocol(asyncio.Protocol):
                     print(self.key_manager.get_all_usernames())
                 finally:
                     response = {"op_code": OP_LOGIN, "event": "auth successful", "payload": ""}
+                    print(f"sent response {response} to {addr}")
                     self.transport.write(json.dumps(response).encode())
                     self.login_state = "AUTHENTICATED"  # Or reset to "AWAITING_AUTH_REQ" if failed
 
