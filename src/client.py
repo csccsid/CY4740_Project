@@ -257,6 +257,7 @@ class ClientCommunicationProtocol(asyncio.Protocol):
     Communication between clients auth process
     """
     async def on_auth(self, message, addr):
+        print("Communication between clients auth process")
         recv_payload_json = message.get('payload')
         
         server_dh_key = None
@@ -273,6 +274,7 @@ class ClientCommunicationProtocol(asyncio.Protocol):
             """
             Receive and Forward auth request
             """
+            print("Receive and Forward auth request")
             self.source_name = recv_payload_json['comm_source']
             nonce = recv_payload_json['nonce']
             recv_nonce = crypto.generate_nonce()
@@ -311,6 +313,7 @@ class ClientCommunicationProtocol(asyncio.Protocol):
             """
             Receive and verify KDC response
             """
+            print("Receive and verify KDC response")
             KDC_response_json =json.loads(KDC_msg.decode())
             if (KDC_response_json.get("op_code") != constant.OP_AUTH or
                 KDC_response_json.get("event") != "auth_KDC_resonse"):
@@ -339,6 +342,7 @@ class ClientCommunicationProtocol(asyncio.Protocol):
             """
             Distribute key
             """
+            print("Distribute key")
             dist_payload_json = {
                 "ciphertext_source": response_payload['ciphertext_source'],
                 "cipher_source_iv": response_payload['cipher_source_iv']
@@ -472,6 +476,7 @@ async def send_comm_message(client, destination, message_text):
                 async with lock:
                     temp_users_list = client.users_list
                 destination_info = temp_users_list.get(destination)
+                print("get destination_info")
                 if destination_info is None:
                     # not in client users_list, update users_list by KDC's version
                     temp_users_list = await list_request(client)
@@ -489,11 +494,14 @@ async def send_comm_message(client, destination, message_text):
                 """
                 Init communication connect
                 """
+                print("pending to init communication connect")
                 channel_key  = None
                 dest_addr = destination_info['client_service_addr']
-                dest_port = destination_info['client_service_port']
+                dest_port = int(destination_info['client_service_port'])
+                print(f"port is {isinstance(dest_port, int)}, {dest_port}")
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                     s.connect((dest_addr, dest_port))
+                    print("connect failed")
                     s.settimeout(20.0) # time out in 10 seconds
                     logger.debug(f"Connect to server for init connection with {destination}")
 
@@ -525,14 +533,16 @@ async def send_comm_message(client, destination, message_text):
                     comm_init_json = {
                         "op_code": constant.OP_AUTH,
                         "event": "comm_init",
-                        "payload": payload_json
+                        "payload": json.dumps(payload_json)
                     }
+                    print("A sends init to B")
                     s.sendall(util_funcs.pack_message(comm_init_json))
                     
 
                     """
                     Process communication auth responsse
                     """
+                    print("receive B's response")
                     auth_response_msg = s.recv(4096)
                     auth_response_json = json.loads(auth_response_msg)
                     if (auth_response_json.get("op_code") != constant.OP_AUTH or
@@ -556,6 +566,7 @@ async def send_comm_message(client, destination, message_text):
                     """
                     Establish communication dh key, send init request
                     """
+                    print("send init reqeust to Establish communication dh key")
                     estab_source_nonce = crypto.generate_nonce()
                     comm_exponent = crypto.generate_dh_private_key()
                     estab_key_init_json = {
@@ -581,6 +592,7 @@ async def send_comm_message(client, destination, message_text):
                     """
                     Receive init response verify
                     """
+                    print("Receive init response verify")
                     estab_chal_message = s.recv(4096)
                     estab_chal_json = json.loads(estab_chal_message)
                     if (estab_chal_json.get("op_code") != constant.OP_AUTH or
@@ -602,6 +614,7 @@ async def send_comm_message(client, destination, message_text):
                     """
                     Establish key and send last challenge response
                     """
+                    print("Establish key and send last challenge response")
                     destination_dh_key = pow(establ_chal_json['recv_modulo'], comm_exponent, constant.P)
                     # add destination to connect list
                     client.key_manager.add_user(destination, destination_dh_key, dest_addr, dest_port)
@@ -768,6 +781,7 @@ async def handle_input(client):
                     if input_cmd[1] == "KDC":
                         print("Cannot send message to KDC")
                     else:
+                        print("pending to send auth message")
                         await send_comm_message(client, input_cmd[1], input_cmd[2])
 
         except (socket.error, ConnectionError, ConnectionResetError, Exception ) as e:
