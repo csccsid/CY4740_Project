@@ -5,6 +5,7 @@ import json
 import logging
 import math
 
+from KeyManager import AuthenticationKeyManager
 from util.crypto import (
     load_key,
     decrypt_with_private_key,
@@ -14,10 +15,10 @@ from util.crypto import (
     fetch_argon2_params,
     encrypt_with_dh_key,
     encrypt_with_key_prime,
-    sign_data
+    sign_data,
+    get_sha256_dh_key
 )
-from util.db import db_connect
-from KeyManager import AuthenticationKeyManager
+from util.db import cred_db_connect, nonce_db_connect
 
 OP_ERROR = 0
 OP_LOGIN = 1
@@ -31,7 +32,8 @@ GENERATOR = 2
 logger = logging.getLogger(__name__)
 logging.basicConfig(filename='server.log', encoding='utf-8', level=logging.DEBUG)
 
-DB = None
+cred_db = None
+nonce_db = None
 Server_Private_Key = None
 
 
@@ -76,14 +78,121 @@ class TCPAuthServerProtocol(asyncio.Protocol):
 
     async def process_message(self, message, addr):
         try:
+            # Using int rather than OP_XXX because of some python match case issue.
             match message.get("op_code"):
                 case 1:
                     await self.on_login(message, addr)
+                case 3:
+                    self.on_auth(message, addr)
                 case 4:
                     self.on_cmd(message, addr)
+
         except Exception as e:
             logger.error(f"Error processing message: {e}")
             self.transport.close()
+
+    def on_auth(self, message, addr):
+        """
+        Handle message forwarded by client to client authentication by the receiver end client.
+        Assuming two clients A and B, and A is trying to communicate with B, this function should receive from B
+        and sends back N_c, K_a{N_a, K_ab}, K_b{N_b, K_ab} to B
+
+        :param message: auth message from receiver client
+        :param addr: address of that receiver client
+        """
+
+        if message["event"] == "request_forward":
+            client_auth_payload = json.loads(message["payload"])
+
+            client_source = client_auth_payload["comm_source"]
+            client_recv = client_auth_payload["comm_recv"]
+
+            client_source_dh_key = self.key_manager.get_dh_key_by_username(client_source)
+            client_recv_dh_key = self.key_manager.get_dh_key_by_username(client_recv)
+
+            client_source_cipher = client_auth_payload["ciphertext_source"]
+            client_source_iv = client_auth_payload["cipher_source_iv"]
+
+            client_recv_cipher = client_auth_payload["ciphertext_recv"]
+            client_recv_iv = client_auth_payload["cipher_recv_iv"]
+
+            if any(v is None for v in [
+                client_source_cipher,
+                client_source_iv,
+                client_recv_cipher,
+                client_recv_iv,
+                client_source_dh_key,
+                client_recv_dh_key
+            ]):
+                self.reset_connection(f"Bad request for on_auth between {client_source} and {client_recv}")
+            else:
+
+                client_source_payload = decrypt_with_dh_key(client_source_dh_key,
+                                                            client_source_cipher,
+                                                            client_source_iv)
+
+                client_recv_payload = decrypt_with_dh_key(client_recv_dh_key,
+                                                          client_recv_cipher,
+                                                          client_recv_iv)
+
+                # entering a series of checking,
+                # check if the session identifier match or has been replayed
+                if (client_recv_payload['nonce'] != client_source_payload['nonce']
+                        or nonce_db.find_one({'nonce': client_recv_payload['nonce']})):
+                    self.reset_connection(f"Invalid nonce, possible replay attack")
+
+                # check if the sender, receiver addr matches
+                elif (client_recv_payload['comm_source'] != client_source_payload['comm_source']
+                        or client_recv_payload['comm_recv'] != client_source_payload['comm_recv']):
+                    self.reset_connection(f"Receiver or Sender mismatch")
+                else:
+                    nonce_db.insert_one({'nonce': client_recv_payload['nonce']})
+
+                    client_shared_key = generate_dh_private_key()
+
+                    client_recv_payload = {
+                        'nonce': client_recv_payload['recv_nonce'],
+                        'auth_key': client_shared_key
+                    }
+
+                    client_source_payload = {
+                        'nonce': client_source_payload['nonce_source'],
+                        'auth_key': client_shared_key
+                    }
+
+                    client_recv_payload_cipher, client_recv_payload_iv = encrypt_with_dh_key(
+                        client_recv_dh_key,
+                        client_recv_payload
+                    )
+
+                    client_source_payload_cipher, client_source_payload_iv = encrypt_with_dh_key(
+                        client_source_dh_key,
+                        client_source_payload
+                    )
+
+                    payload_json = {
+                        'nonce': client_recv_payload['nonce'],
+                        'ciphertext_source': client_source_payload_cipher,
+                        'cipher_source_iv': client_source_payload_iv,
+                        'ciphertext_recv': client_recv_payload_cipher,
+                        'cipher_recv_iv': client_recv_payload_iv
+                    }
+
+                    auth_request_response = {
+                        "op_code": OP_AUTH,
+                        "event": "auth_KDC_response",
+                        "payload": json.dumps(payload_json)
+                    }
+
+                    self.transport.write(json.dumps(auth_request_response).encode('ascii'))
+
+        else:
+            self.reset_connection(f"Invalid auth event for KDC: {message['event']}")
+
+    def reset_connection(self, error_message):
+        print(error_message)
+        self.transport.close()
+        self.__init__()
 
     def on_cmd(self, message, addr):
         """
@@ -118,6 +227,7 @@ class TCPAuthServerProtocol(asyncio.Protocol):
         username = list_request_payload_json['username']
         dh_key = self.key_manager.get_dh_key_by_username(username)
 
+        # if no session key found for username, send an error response with the original request.
         if dh_key is None:
             print(f"No key found for {username}, user never logged in or key expired")
 
@@ -193,7 +303,7 @@ class TCPAuthServerProtocol(asyncio.Protocol):
             # fetch user credentials from DB and construct challenge.
             username = decrypted_payload["username"]
             self.username = username
-            user_doc = DB.find_one({"username": username})
+            user_doc = cred_db.find_one({"username": username})
             if user_doc:
                 password_hash = user_doc.get("hashed_password")
                 self.argon2_hash = password_hash
@@ -254,7 +364,9 @@ class TCPAuthServerProtocol(asyncio.Protocol):
             # and obtain server_nonce
             if decrypted_json.get("server_nonce") == self.server_nonce and decrypted_json.get("client_service_port"):
                 try:
-                    self.key_manager.add_user(self.username, self.dh_key, addr[0], decrypted_json.get("client_service_port"))
+                    self.key_manager.add_user(self.username,
+                                              self.dh_key, addr[0],
+                                              decrypted_json.get("client_service_port"))
                     print(self.key_manager.get_all_usernames())
                 finally:
                     response = {"op_code": OP_LOGIN, "event": "auth successful", "payload": ""}
@@ -296,10 +408,14 @@ async def main(sp):
 
 if __name__ == "__main__":
     args = parse_arguments()
-    DB = db_connect(args.db_uri, args.db_key_path)
+    cred_db = cred_db_connect(args.db_uri, args.db_key_path)
+    nonce_db = nonce_db_connect(args.db_uri, args.db_key_path)
+
     Server_Private_Key = load_key(args.priv_key_path, public=False)
     try:
-        if DB is not None and Server_Private_Key is not None:
+        if (cred_db is not None
+                and Server_Private_Key is not None
+                and nonce_db is not None):
             asyncio.run(main(args.sp))
         else:
             print(f"Database not connected or missing private key")

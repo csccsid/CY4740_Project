@@ -282,6 +282,7 @@ def encrypt_with_key(key, data):
     iv_encoded = base64.b64encode(iv).decode('ascii')
     return ciphertext_encoded, iv_encoded
 
+
 def decrypt_with_key(key, cipher_encoded, iv_encoded):
     iv = base64.b64decode(iv_encoded)
     ciphertext = base64.b64decode(cipher_encoded)
@@ -302,6 +303,7 @@ def encrypt_with_key_prime(key_content, data):
     key_prime = hash_object.digest()
 
     return encrypt_with_key(key_prime, data)
+
 
 def decrypt_with_key_prime(key_content, cipher_encoded, iv_encoded):
     # Convert the dictionary to a JSON string to ensure consistent ordering

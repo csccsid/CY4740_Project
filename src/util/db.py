@@ -13,11 +13,21 @@ def get_database(db_uri: str, db_keyfile_path: str):
     return db
 
 
-def db_connect(db_uri, db_keyfile_path):
+def cred_db_connect(db_uri, db_keyfile_path):
     try:
         database = get_database(db_uri, db_keyfile_path)
         collection = database["cred"]
-        print("Database connected")
+        print("Database['cred'] connected")
+        return collection
+    except CollectionInvalid:
+        print("Getting collection failed, please make sure the collection is named 'cred'")
+
+
+def nonce_db_connect(db_uri, db_keyfile_path):
+    try:
+        database = get_database(db_uri, db_keyfile_path)
+        collection = database["nonce"]
+        print("Database['nonce'] connected")
         return collection
     except CollectionInvalid:
         print("Getting collection failed, please make sure the collection is named 'cred'")

@@ -293,6 +293,7 @@ class ClientCommunicationProtocol(asyncio.Protocol):
                 "cipher_source_iv": recv_payload_json['iv'],
                 "cipher_recv_iv": cipher_recv_iv
             }
+
             request_forward_json = {
                 "op_code": constant.OP_AUTH,
                 "event": "request_forward",
@@ -313,7 +314,7 @@ class ClientCommunicationProtocol(asyncio.Protocol):
             """
             KDC_response_json = json.loads(KDC_msg.decode())
             if (KDC_response_json.get("op_code") != constant.OP_AUTH or
-                    KDC_response_json.get("event") != "auth_KDC_resonse"):
+                    KDC_response_json.get("event") != "auth_KDC_response"):
                 # invalid response
                 raise ValueError(f"Invalid format response from KDC in auth process {KDC_response_json}")
 
