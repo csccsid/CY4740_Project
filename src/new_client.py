@@ -11,7 +11,6 @@ import configparser
 import datetime
 import json
 import logging
-import constant
 
 from aioconsole import ainput
 from argon2 import PasswordHasher

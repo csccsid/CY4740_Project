@@ -1,20 +1,17 @@
 import json
-import struct
 import sys
-from cryptography.hazmat.primitives.asymmetric import padding
+
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import padding
 
 """
 Some help functions
 """
 
-
 """
 Check signature
 """
-
-
 
 
 def check_signature(public_key, signature, message):
@@ -61,7 +58,7 @@ Pack a package
 
 
 def pack_message(message_json):
-    #message = json.dumps(message_json).encode()
-    #total_length = 4 + len(message)
-    #return struct.pack('!I', total_length) + message
+    # message = json.dumps(message_json).encode()
+    # total_length = 4 + len(message)
+    # return struct.pack('!I', total_length) + message
     return json.dumps(message_json).encode()
