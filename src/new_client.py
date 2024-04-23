@@ -7,6 +7,7 @@ This client will be divided into two major part:
 import argparse
 import asyncio
 import base64
+import configparser
 import datetime
 import json
 import logging
@@ -53,12 +54,13 @@ def parse_arguments():
     Parse command line arguments for the server.
     """
     parser = argparse.ArgumentParser(description="Instant message exchange app, client side")
-    parser.add_argument('-host', type=str, help='Client host addr', required=True)
-    parser.add_argument('-client_service_port', type=int, help='The service port client uses, for handling incoming '
-                                                               'requests', required=True)
-    parser.add_argument('-username', type=str, help="Username for login KDC", required=True)
-    parser.add_argument('-password', type=str, help='Password for login KDC', required=True)
-    parser.add_argument('-server_pub_key_path', type=str, help='Path to server public key file', required=True)
+    # parser.add_argument('-host', type=str, help='Client host addr', required=True)
+    # parser.add_argument('-client_service_port', type=int, help='The service port client uses, for handling incoming '
+    #                                                            'requests', required=True)
+    # parser.add_argument('-username', type=str, help="Username for login KDC", required=True)
+    # parser.add_argument('-password', type=str, help='Password for login KDC', required=True)
+    # parser.add_argument('-server_pub_key_path', type=str, help='Path to server public key file', required=True)
+    parser.add_argument('-config', type=str, help='Path to client .ini configuration file', required=True)
 
     return parser.parse_args()
 
@@ -125,7 +127,6 @@ class Client:
             await writer.drain()
 
             # now we need to wait for the second stage of the login request, await server to send back its challenge
-            # Optionally, receive a response
             challenge = await reader.read(4096)
             challenge_payload_content = json.loads(json.loads(challenge.decode('ascii'))['payload'])
 
@@ -722,7 +723,7 @@ class TCPClientServerProtocol(asyncio.Protocol):
         super().connection_lost(exc)
 
 
-async def main(client_service_port, username, password, host):
+async def main(client_service_port):
     loop = asyncio.get_running_loop()
 
     # client side runs a server to async-ly handle requests from all other client as well as server.
@@ -740,19 +741,27 @@ async def main(client_service_port, username, password, host):
 if __name__ == "__main__":
     args = parse_arguments()
 
-    server_ip = constant.SERVER_ADDRESS
-    server_port = constant.SERVER_PORT
-    server_public_key = load_key(args.server_pub_key_path, public=True)
-    client_instance = Client(args.username,
-                             args.password,
-                             args.client_service_port,
+    config = configparser.ConfigParser()
+    config.read(args.config)
+
+    server_ip = config['SERVER']['ip']
+    server_port = int(config['SERVER']['port'])
+    server_public_key = load_key(config['SERVER']['pub_key_path'], public=True)
+    username = config['CLIENT']['username']
+    client_service_port = int(config['CLIENT']['port'])
+
+    password = input(f"Password for chat server {server_ip, server_port}:{username} -> ")
+
+    client_instance = Client(config['CLIENT']['username'],
+                             password,
+                             client_service_port,
                              server_ip,
                              server_port,
-                             args.host)
+                             config['CLIENT']['ip'])
     try:
         if server_public_key is not None and client_instance is not None:
             asyncio.run(client_instance.login())
-            asyncio.run(main(args.client_service_port, args.username, args.password, args.host))
+            asyncio.run(main(client_service_port))
         else:
             print(f"Client instant start failed or missing server public key")
     except KeyboardInterrupt:
