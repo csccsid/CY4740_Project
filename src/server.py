@@ -18,7 +18,7 @@ from util.crypto import (
     encrypt_with_key_prime,
     sign_data,
 )
-from util.db import cred_db_connect, nonce_db_connect
+from util.db import db_connect
 
 OP_ERROR = 0
 OP_LOGIN = 1
@@ -495,8 +495,8 @@ async def main(sp):
 
 if __name__ == "__main__":
     args = parse_arguments()
-    cred_db = cred_db_connect(args.db_uri, args.db_key_path)
-    nonce_db = nonce_db_connect(args.db_uri, args.db_key_path)
+    cred_db = db_connect(args.db_uri, args.db_key_path, "cred")
+    nonce_db = db_connect(args.db_uri, args.db_key_path, "nonce")
 
     Server_Private_Key = load_key(args.priv_key_path, public=False)
     try:
