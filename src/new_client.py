@@ -297,6 +297,10 @@ class Client:
         :param dest_content: message content #TDDO: input validation?
         :return:
         """
+
+        # should always request for latest user list from server
+
+        await self.list(verbose=False)
         dest_user_info = self.user_list.get(dest_username)
         dest_service_ip = dest_user_info.get("client_service_addr")
         dest_service_port = dest_user_info.get("client_service_port")
