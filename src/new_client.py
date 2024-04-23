@@ -302,9 +302,11 @@ class Client:
 
         await self.list(verbose=False)
         dest_user_info = self.user_list.get(dest_username)
+        if dest_user_info is None:
+            print(f"Error fetching receiver info, please make sure it's logged in, send aborted")
+            return
         dest_service_ip = dest_user_info.get("client_service_addr")
         dest_service_port = dest_user_info.get("client_service_port")
-
         c2c_dh_key = self.key_manager.get_dh_key_by_username(dest_username)
 
         reader, writer = await asyncio.open_connection(dest_service_ip, dest_service_port)
