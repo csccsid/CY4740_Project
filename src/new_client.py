@@ -85,6 +85,7 @@ class Client:
         self.private_key = generate_dh_private_key()
         self.user_list = {}
         self.otwayrees_list = {}
+        self.nonce_list = {}
         self.user_info = {'client_service_addr': self.host,
                           'client_service_port': self.client_service_port,
                           'username': self.username}
@@ -281,6 +282,11 @@ class Client:
             logout_request_ready = json.dumps(logout_request).encode()
             writer.write(logout_request_ready)
             await writer.drain()
+
+            logout_resp = await reader.read(1024)
+
+            if logout_resp.decode() != "ACK":
+                print("Logout failed")
 
         finally:
             writer.close()
@@ -525,12 +531,25 @@ class TCPClientServerProtocol(asyncio.Protocol):
             match message.get("op_code"):
                 case 3:
                     await self.on_auth(message, addr)
+                case 2:
+                    await self.on_logout(message, addr)
                 case 5:
                     await self.on_msg(message, addr)
 
         except Exception as e:
             logger.error(f"Error processing message: {e}")
             self.transport.close()
+
+    async def on_logout(self, message, addr):
+        logout_json = json.loads(message['payload'])
+        logout_content = decrypt_with_dh_key(client_instance.dh_key,
+                                             logout_json['ciphertext'],
+                                             logout_json['gcm_nonce'],
+                                             logout_json['gcm_tag'])
+        server_nonce = logout_content['nonce']
+
+        if server_nonce not in client_instance.nonce_list:
+            await self.key_manager.remove_user(logout_content['username'])
 
     async def on_msg(self, message, addr):
         if message['event'] == 'message':

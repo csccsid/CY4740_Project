@@ -56,10 +56,67 @@ def verify_timestamp(message_timestamp, validity_period=120):
     current_timestamp = int(now.timestamp())
 
     # Check if the current timestamp is within the valid time period
-    if current_timestamp - message_timestamp <= validity_period:
-        return True
-    else:
-        return False
+    return current_timestamp - message_timestamp <= validity_period
+
+
+async def send_message_to_client(ip, port, message):
+    try:
+        # Open connection to the client
+        _, tcp_writer = await asyncio.open_connection(ip, port)
+        # Send the message
+        tcp_writer.write(json.dumps(message).encode('ascii'))  # Ensure message is in bytes
+        await tcp_writer.drain()  # Ensure all data is sent before closing
+    except Exception as e:
+        print(f"Failed to send message to {ip}:{port}, error: {e}")
+    finally:
+        tcp_writer.close()
+        await tcp_writer.wait_closed()
+
+
+async def broadcast_logout(key_manager, logged_out_user):
+    user_list = key_manager.get_all_users()
+
+    # Create a list of tasks for sending messages concurrently
+    tasks = []
+
+    for user, addr in user_list.items():
+        print(user, addr)
+        user_service_ip = addr['client_service_addr']
+        user_service_port = addr['client_service_port']
+
+        session_key = key_manager.get_dh_key_by_username(user)
+        nonce = generate_nonce()
+
+        logout_content = {
+            "nonce": nonce,
+            "username": logged_out_user
+        }
+
+        (logout_broadcast_cipher,
+         logout_broadcast_gcm_nonce,
+         logout_broadcast_gcm_tag) = encrypt_with_dh_key(dh_key=session_key, data=logout_content)
+
+        logout_broadcast_payload = {
+            "ciphertext": logout_broadcast_cipher,
+            "gcm_nonce": logout_broadcast_gcm_nonce,
+            "gcm_tag": logout_broadcast_gcm_tag
+        }
+
+        logout_broadcast = {
+            "op_code": OP_LOGOUT,
+            "event": "broadcast",
+            "payload": json.dumps(logout_broadcast_payload)
+        }
+
+        print(f'Broadcasting logout to: {user}')
+
+        # Each send_message call is wrapped in a task and added to the tasks list
+        task = asyncio.create_task(
+            send_message_to_client(user_service_ip, user_service_port, logout_broadcast))
+        tasks.append(task)
+
+    # Wait for all tasks to complete
+    await asyncio.gather(*tasks)
 
 
 class TCPAuthServerProtocol(asyncio.Protocol):
@@ -95,7 +152,7 @@ class TCPAuthServerProtocol(asyncio.Protocol):
                 case 1:
                     await self.on_login(message, addr)
                 case 2:
-                    self.on_logout(message, addr)
+                    await self.on_logout(message, addr)
                 case 3:
                     self.on_auth(message, addr)
                 case 4:
@@ -104,7 +161,7 @@ class TCPAuthServerProtocol(asyncio.Protocol):
             logger.error(f"Error processing message: {e}")
             self.transport.close()
 
-    def on_logout(self, message, addr):
+    async def on_logout(self, message, addr):
         """
         Handles client log out request, the login state will be terminated under the following conditions:
         1. The session has been established for more than 30 minutes.
@@ -144,8 +201,11 @@ class TCPAuthServerProtocol(asyncio.Protocol):
 
             if (verify_timestamp(logout_request['timestamp'])
                     and logout_request['username'] == logout_request_user):
-                self.key_manager.remove_user(logout_request_user)
+
+                await self.key_manager.remove_user(logout_request_user)
+                await broadcast_logout(self.key_manager, logout_request['username'])
                 print(f'Logged out user: {logout_request_user} with addr {addr}')
+                self.transport.write("ACK".encode())
             else:
                 self.reset_connection(f"Invalid timestamp: {logout_request['timestamp']}")
                 return

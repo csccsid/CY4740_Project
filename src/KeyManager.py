@@ -25,7 +25,7 @@ class AuthenticationKeyManager:
                 'client_service_port': client_service_port
             }
 
-    def remove_user(self, username):
+    async def remove_user(self, username):
         """Remove a user by username."""
         with self.lock:
             if username in self.authenticated_users:
